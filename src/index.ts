@@ -255,27 +255,77 @@ export class LeverMCP extends McpAgent {
       },
       async (args) => {
         try {
-          const candidate = await this.client.getOpportunity(args.opportunity_id);
+          const opportunity = await this.client.getOpportunity(args.opportunity_id);
+          
+          // Extract basic info
+          const name = opportunity.name || "Unknown";
+          const emails = opportunity.emails || [];
+          const location = typeof opportunity.location === 'object' && opportunity.location ? 
+            opportunity.location.name : String(opportunity.location || "Unknown");
+          
+          // Format stage information
+          let stage_current = "Unknown";
+          let stage_id = "";
+          if (typeof opportunity.stage === 'object' && opportunity.stage) {
+            stage_current = opportunity.stage.text || "Unknown";
+            stage_id = opportunity.stage.id || "";
+          } else if (opportunity.stage) {
+            stage_current = String(opportunity.stage);
+          }
+          
+          // Format owner information
+          let owner_name = "Unassigned";
+          if (typeof opportunity.owner === 'object' && opportunity.owner) {
+            owner_name = opportunity.owner.name || "Unassigned";
+          }
+          
+          // Extract organizations from headline
+          const headline = opportunity.headline || "";
+          const organizations = headline ? headline.split(",").map(org => org.trim()) : [];
+          
+          // Get links and phones
+          const links = opportunity.links || [];
+          const phones = opportunity.phones || [];
+          
+          // Format created date
+          const createdAt = opportunity.createdAt ? 
+            new Date(opportunity.createdAt).toISOString().replace('T', ' ').substring(0, 16) : 
+            "Unknown";
+          
+          const result = {
+            basic_info: formatOpportunity(opportunity),
+            contact: {
+              emails: emails,
+              phones: phones,
+              location: location
+            },
+            stage: {
+              current: stage_current,
+              id: stage_id
+            },
+            tags: opportunity.tags || [],
+            sources: opportunity.sources || [],
+            origin: opportunity.origin || "Unknown",
+            owner: owner_name,
+            headline: headline,
+            organizations: organizations,
+            links: links,
+            applications: opportunity.applications ? opportunity.applications.length : 0,
+            createdAt: createdAt,
+            archived: opportunity.archived || null
+          };
+          
           return {
             content: [{
               type: "text",
-              text: JSON.stringify(formatOpportunity(candidate), null, 2)
+              text: JSON.stringify(result, null, 2)
             }]
           };
         } catch (error) {
-          // Return a default structure with error information
           return {
             content: [{
               type: "text",
               text: JSON.stringify({
-                id: args.opportunity_id,
-                name: "Unknown",
-                email: "N/A",
-                stage: "Unknown",
-                posting: "Unknown",
-                location: "Unknown",
-                organizations: "",
-                created: "Unknown",
                 error: error instanceof Error ? error.message : 'Failed to fetch candidate'
               }, null, 2)
             }]

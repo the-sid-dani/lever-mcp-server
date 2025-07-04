@@ -17,7 +17,10 @@ export interface LeverOpportunity {
   applications?: any[];
   origin?: string;
   sources?: string[];
-  archived?: boolean;
+  archived?: boolean | any;
+  owner?: { name?: string; id?: string } | any;
+  links?: string[];
+  phones?: { type?: string; value?: string }[] | string[];
 }
 
 export interface LeverPosting {
