@@ -53,7 +53,8 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
     {
       query: z.string().optional(),
       stage: z.string().optional(),
-      limit: z.number().default(100),
+      limit: z.number().default(200),
+      page: z.number().default(1).describe("Page number (1-based)"),
     },
     async (args) => {
       try {
@@ -86,10 +87,11 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
           const allOpportunities: LeverOpportunity[] = [];
           let offset: string | undefined;
           let pagesChecked = 0;
-          const maxPages = 2; // Only check first 200 candidates
+          const maxPages = 5; // Increased to check more candidates
           const queryLower = args.query.toLowerCase();
+          const maxFetch = args.limit * 5; // Fetch more to ensure we have enough for pagination
           
-          while (pagesChecked < maxPages && allOpportunities.length < args.limit) {
+          while (pagesChecked < maxPages && allOpportunities.length < maxFetch) {
             const response = await client.getOpportunities({
               stage_id: args.stage,
               limit: 100,
@@ -103,7 +105,6 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
               const name = (c.name || "").toLowerCase();
               if (queryLower && name.includes(queryLower)) {
                 allOpportunities.push(c);
-                if (allOpportunities.length >= args.limit) break;
               }
             }
             
@@ -116,15 +117,28 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
             if (!offset) break;
           }
           
+          // Calculate pagination
+          const page = Math.max(1, args.page);
+          const startIndex = (page - 1) * args.limit;
+          const endIndex = startIndex + args.limit;
+          const paginatedCandidates = allOpportunities.slice(startIndex, endIndex);
+          const totalPages = Math.ceil(allOpportunities.length / args.limit);
+          const hasMore = page < totalPages;
+          
           const result: any = {
-            count: allOpportunities.length,
+            count: paginatedCandidates.length,
+            page: page,
+            total_matches: allOpportunities.length,
+            total_pages: totalPages,
+            has_more: hasMore,
+            next_page: hasMore ? page + 1 : null,
             query: args.query,
-            candidates: allOpportunities.map(formatOpportunity)
+            candidates: paginatedCandidates.map(formatOpportunity)
           };
           
           // Add warning if we hit the limit
-          if (pagesChecked >= maxPages && allOpportunities.length === 0) {
-            result.warning = "Search limited to first 200 candidates. Results may be incomplete. Try using email search or tags for better results.";
+          if (pagesChecked >= maxPages && hasMore) {
+            result.warning = `Search limited to first ${pagesChecked * 100} candidates. More results may exist.`;
             result.total_scanned = pagesChecked * 100;
           }
           

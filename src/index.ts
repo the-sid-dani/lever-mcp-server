@@ -103,7 +103,8 @@ export class LeverMCP extends McpAgent {
         stage: z.string().optional(),
         tags: z.string().optional(),
         posting_id: z.string().optional(),
-        limit: z.number().default(100),
+        limit: z.number().default(200),
+        page: z.number().default(1).describe("Page number (1-based)"),
       },
       async (args) => {
         try {
@@ -115,7 +116,8 @@ export class LeverMCP extends McpAgent {
 
           const allCandidates: LeverOpportunity[] = [];
           let offset: string | undefined;
-          const maxFetch = Math.min(args.limit * 10, 1000);
+          const maxFetch = Math.min(args.limit * 10, 2000); // Increased to support more pages
+          let totalMatches = 0; // Track total matches for pagination info
 
           // Fetch candidates with pagination
           while (allCandidates.length < maxFetch) {
@@ -215,6 +217,7 @@ export class LeverMCP extends McpAgent {
               return companyMatch && skillMatch && locationMatch && tagMatch;
             });
 
+            totalMatches += filteredCandidates.length;
             allCandidates.push(...filteredCandidates);
 
             if (!response.hasNext) break;
@@ -227,14 +230,24 @@ export class LeverMCP extends McpAgent {
             }
           }
 
-          // Limit final results
-          const finalCandidates = allCandidates.slice(0, args.limit);
+          // Calculate pagination
+          const page = Math.max(1, args.page);
+          const startIndex = (page - 1) * args.limit;
+          const endIndex = startIndex + args.limit;
+          const paginatedCandidates = allCandidates.slice(startIndex, endIndex);
+          const totalPages = Math.ceil(allCandidates.length / args.limit);
+          const hasMore = page < totalPages;
 
           return {
             content: [{
               type: "text",
               text: JSON.stringify({
-                count: finalCandidates.length,
+                count: paginatedCandidates.length,
+                page: page,
+                total_matches: allCandidates.length,
+                total_pages: totalPages,
+                has_more: hasMore,
+                next_page: hasMore ? page + 1 : null,
                 search_criteria: {
                   companies: args.companies,
                   skills: args.skills,
@@ -243,7 +256,7 @@ export class LeverMCP extends McpAgent {
                   tags: args.tags,
                   posting: args.posting_id
                 },
-                candidates: finalCandidates.map(formatOpportunity)
+                candidates: paginatedCandidates.map(formatOpportunity)
               }, null, 2)
             }]
           };
@@ -277,7 +290,8 @@ export class LeverMCP extends McpAgent {
       {
         companies: z.string(),
         current_only: z.boolean().default(true),
-        limit: z.number().default(100),
+        limit: z.number().default(200),
+        page: z.number().default(1).describe("Page number (1-based)"),
       },
       async (args) => {
         try {
@@ -360,14 +374,24 @@ export class LeverMCP extends McpAgent {
             }
           }
           
-          // Limit results
-          const uniqueCandidates = allCandidates.slice(0, args.limit);
+          // Calculate pagination
+          const page = Math.max(1, args.page);
+          const startIndex = (page - 1) * args.limit;
+          const endIndex = startIndex + args.limit;
+          const paginatedCandidates = allCandidates.slice(startIndex, endIndex);
+          const totalPages = Math.ceil(allCandidates.length / args.limit);
+          const hasMore = page < totalPages;
           
           const results = {
-            count: uniqueCandidates.length,
+            count: paginatedCandidates.length,
+            page: page,
+            total_matches: allCandidates.length,
+            total_pages: totalPages,
+            has_more: hasMore,
+            next_page: hasMore ? page + 1 : null,
             searched_companies: companyList,
             current_employees_only: args.current_only,
-            candidates: uniqueCandidates.map(c => ({
+            candidates: paginatedCandidates.map(c => ({
               ...formatOpportunity(c),
               matched_company: c.matched_company || "Unknown",
               all_organizations: c.full_headline || c.headline || ""
@@ -585,24 +609,73 @@ export class LeverMCP extends McpAgent {
       "lever_find_candidates_for_role",
       {
         posting_id: z.string(),
-        limit: z.number().default(100),
+        limit: z.number().default(200),
+        page: z.number().default(1).describe("Page number (1-based)"),
       },
       async (args) => {
-        const response = await this.client.getOpportunities({ 
-          posting_id: args.posting_id, 
-          limit: args.limit
-        });
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              count: response.data.length,
-              posting_id: args.posting_id,
-              candidates: response.data.map(formatOpportunity)
-            }, null, 2)
-          }]
-        };
+        try {
+          const allCandidates: LeverOpportunity[] = [];
+          let offset: string | undefined;
+          const maxFetch = Math.min(args.limit * 10, 2000); // Support up to 10 pages
+
+          // Fetch all candidates for this posting
+          while (allCandidates.length < maxFetch) {
+            const response = await this.client.getOpportunities({ 
+              posting_id: args.posting_id, 
+              limit: 100,
+              offset
+            });
+
+            if (!response.data || response.data.length === 0) break;
+            
+            allCandidates.push(...response.data);
+            
+            if (!response.hasNext) break;
+            
+            // Get next offset
+            if (response.data.length > 0) {
+              offset = response.data[response.data.length - 1].id;
+            } else {
+              break;
+            }
+          }
+
+          // Calculate pagination
+          const page = Math.max(1, args.page);
+          const startIndex = (page - 1) * args.limit;
+          const endIndex = startIndex + args.limit;
+          const paginatedCandidates = allCandidates.slice(startIndex, endIndex);
+          const totalPages = Math.ceil(allCandidates.length / args.limit);
+          const hasMore = page < totalPages;
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                count: paginatedCandidates.length,
+                page: page,
+                total_matches: allCandidates.length,
+                total_pages: totalPages,
+                has_more: hasMore,
+                next_page: hasMore ? page + 1 : null,
+                posting_id: args.posting_id,
+                candidates: paginatedCandidates.map(formatOpportunity)
+              }, null, 2)
+            }]
+          };
+        } catch (error) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                error: error instanceof Error ? error.message : String(error),
+                count: 0,
+                posting_id: args.posting_id,
+                candidates: []
+              }, null, 2)
+            }]
+          };
+        }
       }
     );
   }
