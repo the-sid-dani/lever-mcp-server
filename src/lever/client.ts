@@ -30,6 +30,7 @@ export class LeverClient {
 		endpoint: string,
 		params?: Record<string, any>,
 		body?: any,
+		retryCount: number = 0,
 	): Promise<T> {
 		// Queue requests to ensure rate limiting
 		this.requestQueue = this.requestQueue.then(async () => {
@@ -45,21 +46,40 @@ export class LeverClient {
 				});
 			}
 
-			const response = await fetch(url.toString(), {
-				method,
-				headers: {
-					Authorization: `Bearer ${this.apiKey}`,
-					"Content-Type": "application/json",
-				},
-				body: body ? JSON.stringify(body) : undefined,
-			});
+			try {
+				const response = await fetch(url.toString(), {
+					method,
+					headers: {
+						Authorization: `Bearer ${this.apiKey}`,
+						"Content-Type": "application/json",
+					},
+					body: body ? JSON.stringify(body) : undefined,
+				});
 
-			if (!response.ok) {
-				const error = await response.text();
-				throw new Error(`Lever API error: ${response.status} - ${error}`);
+				if (!response.ok) {
+					const errorText = await response.text();
+					
+					// Retry on server errors (5xx) but not client errors (4xx)
+					if (response.status >= 500 && retryCount < 2) {
+						console.error(`Lever API error ${response.status}, retrying... (attempt ${retryCount + 1}/3)`);
+						// Wait before retrying (exponential backoff)
+						await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+						return this.makeRequest<T>(method, endpoint, params, body, retryCount + 1);
+					}
+					
+					throw new Error(`Lever API error: ${response.status} - ${errorText}`);
+				}
+
+				return response.json();
+			} catch (error) {
+				// Retry on network errors
+				if (retryCount < 2 && error instanceof TypeError && error.message.includes('fetch')) {
+					console.error(`Network error, retrying... (attempt ${retryCount + 1}/3)`);
+					await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+					return this.makeRequest<T>(method, endpoint, params, body, retryCount + 1);
+				}
+				throw error;
 			}
-
-			return response.json();
 		});
 
 		return this.requestQueue;
