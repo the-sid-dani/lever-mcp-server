@@ -1,4 +1,4 @@
-import { LeverApiResponse, LeverOpportunity, LeverPosting } from '../types/lever';
+import type { LeverApiResponse, LeverOpportunity, LeverPosting } from '../types/lever';
 
 export class LeverClient {
   private baseUrl = 'https://api.lever.co/v1';

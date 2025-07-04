@@ -2,7 +2,7 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LeverClient } from "./lever/client";
-import { LeverOpportunity } from "./types/lever";
+import type { LeverOpportunity } from "./types/lever";
 import { registerAdditionalTools, formatOpportunity as formatOpp } from "./additional-tools";
 
 // Environment interface
@@ -102,7 +102,7 @@ export class LeverMCP extends McpAgent {
           const tagList = args.tags ? args.tags.split(',').map(t => t.trim().toLowerCase()) : [];
 
           const allCandidates: LeverOpportunity[] = [];
-          let offset: string | undefined = undefined;
+          let offset: string | undefined ;
           const maxFetch = Math.min(args.limit * 10, 1000);
 
           // Fetch candidates with pagination
@@ -254,13 +254,33 @@ export class LeverMCP extends McpAgent {
         opportunity_id: z.string(),
       },
       async (args) => {
-        const candidate = await this.client.getOpportunity(args.opportunity_id);
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(formatOpportunity(candidate), null, 2)
-          }]
-        };
+        try {
+          const candidate = await this.client.getOpportunity(args.opportunity_id);
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(formatOpportunity(candidate), null, 2)
+            }]
+          };
+        } catch (error) {
+          // Return a default structure with error information
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                id: args.opportunity_id,
+                name: "Unknown",
+                email: "N/A",
+                stage: "Unknown",
+                posting: "Unknown",
+                location: "Unknown",
+                organizations: "",
+                created: "Unknown",
+                error: error instanceof Error ? error.message : 'Failed to fetch candidate'
+              }, null, 2)
+            }]
+          };
+        }
       }
     );
 
