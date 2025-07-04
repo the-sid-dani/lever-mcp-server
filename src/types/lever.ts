@@ -29,6 +29,7 @@ export interface LeverPosting {
   state: string;
   location?: { name: string };
   team?: { text: string };
+  urls?: { show?: string };
 }
 
 export interface LeverApiResponse<T> {

@@ -77,18 +77,28 @@ export class LeverClient {
     );
   }
 
-  async getOpportunity(id: string): Promise<LeverOpportunity> {
-    return this.makeRequest<LeverOpportunity>('GET', `/opportunities/${id}`);
+  async getOpportunity(id: string): Promise<{data: LeverOpportunity}> {
+    const opportunity = await this.makeRequest<LeverOpportunity>('GET', `/opportunities/${id}`);
+    return { data: opportunity };
   }
 
-  async addNote(opportunityId: string, note: string): Promise<any> {
-    return this.makeRequest('POST', `/opportunities/${opportunityId}/notes`, undefined, {
-      value: note
-    });
+  async addNote(opportunityId: string, note: string, authorEmail?: string): Promise<any> {
+    const data: any = { value: note };
+    if (authorEmail) {
+      data.author = authorEmail;
+    }
+    return this.makeRequest('POST', `/opportunities/${opportunityId}/notes`, undefined, data);
   }
 
-  async getPostings(state: string = 'published'): Promise<LeverApiResponse<LeverPosting>> {
-    return this.makeRequest<LeverApiResponse<LeverPosting>>('GET', '/postings', { state });
+  async getPostings(state: string = 'published', limit: number = 25, offset?: string): Promise<LeverApiResponse<LeverPosting>> {
+    const params: any = { 
+      state,
+      limit: Math.min(limit, 100)
+    };
+    if (offset) {
+      params.offset = offset;
+    }
+    return this.makeRequest<LeverApiResponse<LeverPosting>>('GET', '/postings', params);
   }
 
   async getStages(): Promise<any> {
@@ -105,11 +115,27 @@ export class LeverClient {
     });
   }
 
-  async getApplications(opportunityId: string): Promise<any> {
+  async getOpportunityApplications(opportunityId: string): Promise<any> {
     return this.makeRequest('GET', `/opportunities/${opportunityId}/applications`);
   }
 
-  async getFiles(opportunityId: string): Promise<any> {
+  async getApplication(opportunityId: string, applicationId: string): Promise<any> {
+    return this.makeRequest('GET', `/opportunities/${opportunityId}/applications/${applicationId}`);
+  }
+
+  async getOpportunityFiles(opportunityId: string): Promise<any> {
     return this.makeRequest('GET', `/opportunities/${opportunityId}/files`);
+  }
+
+  async getOpportunityResumes(opportunityId: string): Promise<any> {
+    return this.makeRequest('GET', `/opportunities/${opportunityId}/resumes`);
+  }
+
+  async updateOpportunityStage(opportunityId: string, stageId: string, reason?: string): Promise<any> {
+    const data: any = { stage: stageId };
+    if (reason) {
+      data.reason = reason;
+    }
+    return this.makeRequest('POST', `/opportunities/${opportunityId}/stage`, undefined, data);
   }
 }

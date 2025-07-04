@@ -53,24 +53,113 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
     {
       query: z.string().optional(),
       stage: z.string().optional(),
-      limit: z.number().default(25),
+      limit: z.number().default(100),
     },
     async (args) => {
-      const response = await client.getOpportunities({ 
-        stage_id: args.stage, 
-        limit: args.limit 
-      });
-      
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            count: response.data.length,
-            hasMore: response.hasNext || false,
-            candidates: response.data.map(formatOpportunity)
-          }, null, 2)
-        }]
-      };
+      try {
+        // Check if query looks like an email
+        let emailFilter: string | undefined;
+        if (args.query && args.query.includes("@")) {
+          emailFilter = args.query;
+        }
+
+        if (emailFilter) {
+          // Use email search
+          const response = await client.getOpportunities({ 
+            email: emailFilter,
+            stage_id: args.stage, 
+            limit: args.limit 
+          });
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                count: response.data.length,
+                query: args.query,
+                candidates: response.data.map(formatOpportunity)
+              }, null, 2)
+            }]
+          };
+        } else if (args.query) {
+          // For name searches, fetch and filter locally
+          const allOpportunities: LeverOpportunity[] = [];
+          let offset: string | undefined;
+          let pagesChecked = 0;
+          const maxPages = 2; // Only check first 200 candidates
+          const queryLower = args.query.toLowerCase();
+          
+          while (pagesChecked < maxPages && allOpportunities.length < args.limit) {
+            const response = await client.getOpportunities({
+              stage_id: args.stage,
+              limit: 100,
+              offset
+            });
+            
+            if (!response.data || response.data.length === 0) break;
+            
+            // Filter candidates by name
+            for (const c of response.data) {
+              const name = (c.name || "").toLowerCase();
+              if (queryLower && name.includes(queryLower)) {
+                allOpportunities.push(c);
+                if (allOpportunities.length >= args.limit) break;
+              }
+            }
+            
+            pagesChecked++;
+            if (!response.hasNext) break;
+            
+            // Get next offset
+            const lastCandidate = response.data[response.data.length - 1];
+            offset = lastCandidate?.id;
+            if (!offset) break;
+          }
+          
+          const result: any = {
+            count: allOpportunities.length,
+            query: args.query,
+            candidates: allOpportunities.map(formatOpportunity)
+          };
+          
+          // Add warning if we hit the limit
+          if (pagesChecked >= maxPages && allOpportunities.length === 0) {
+            result.warning = "Search limited to first 200 candidates. Results may be incomplete. Try using email search or tags for better results.";
+            result.total_scanned = pagesChecked * 100;
+          }
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }]
+          };
+        } else {
+          // No search criteria, just get candidates
+          const response = await client.getOpportunities({ 
+            stage_id: args.stage, 
+            limit: args.limit 
+          });
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                count: response.data.length,
+                query: args.query,
+                candidates: response.data.map(formatOpportunity)
+              }, null, 2)
+            }]
+          };
+        }
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+          }]
+        };
+      }
     }
   );
 
@@ -78,28 +167,86 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
   server.tool(
     "lever_quick_find_candidate",
     {
-      name: z.string(),
-      limit: z.number().default(10),
+      name_or_email: z.string(),
     },
     async (args) => {
-      const nameLower = args.name.toLowerCase();
-      const response = await client.getOpportunities({ limit: 100 });
-      
-      const matches = response.data.filter(c => {
-        const candidateName = (c.name || '').toLowerCase();
-        return candidateName.includes(nameLower);
-      });
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            search_name: args.name,
-            count: matches.length,
-            candidates: matches.slice(0, args.limit).map(formatOpportunity)
-          }, null, 2)
-        }]
-      };
+      try {
+        // If it looks like an email, use email search
+        if (args.name_or_email.includes("@")) {
+          const response = await client.getOpportunities({
+            email: args.name_or_email,
+            limit: 10
+          });
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                count: response.data.length,
+                search_type: "email",
+                query: args.name_or_email,
+                candidates: response.data.map(formatOpportunity)
+              }, null, 2)
+            }]
+          };
+        }
+        
+        // Otherwise, do a limited name search
+        const queryLower = args.name_or_email.toLowerCase();
+        const matched: LeverOpportunity[] = [];
+        let offset: string | undefined;
+        let pagesChecked = 0;
+        const maxPages = 3; // Only check first 300 candidates
+        
+        while (pagesChecked < maxPages) {
+          const response = await client.getOpportunities({
+            limit: 100,
+            offset
+          });
+          
+          if (!response.data || response.data.length === 0) break;
+          
+          // Quick scan for name matches
+          for (const c of response.data) {
+            const cName = (c.name || "").toLowerCase();
+            
+            if (queryLower && (queryLower.includes(cName) || cName.includes(queryLower))) {
+              matched.push(c);
+              if (matched.length >= 5) break; // Return first 5 matches
+            }
+          }
+          
+          if (matched.length >= 5) break;
+          
+          pagesChecked++;
+          if (!response.hasNext) break;
+          
+          // Get next offset
+          const lastCandidate = response.data[response.data.length - 1];
+          offset = lastCandidate?.id;
+          if (!offset) break;
+        }
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              count: matched.length,
+              search_type: "quick_name_search",
+              query: args.name_or_email,
+              candidates: matched.map(formatOpportunity),
+              note: `Quick search checked first ${pagesChecked * 100} candidates. For comprehensive search, use email if available.`
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+          }]
+        };
+      }
     }
   );
 
@@ -107,32 +254,74 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
   server.tool(
     "lever_find_candidate_in_posting",
     {
+      name: z.string(),
       posting_id: z.string(),
-      candidate_name: z.string(),
+      stage: z.string().optional(),
     },
     async (args) => {
-      const nameLower = args.candidate_name.toLowerCase();
-      const response = await client.getOpportunities({ 
-        posting_id: args.posting_id,
-        limit: 100 
-      });
-      
-      const matches = response.data.filter(c => {
-        const candidateName = (c.name || '').toLowerCase();
-        return candidateName.includes(nameLower);
-      });
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
+      try {
+        const nameLower = args.name.toLowerCase();
+        const matched: LeverOpportunity[] = [];
+        let offset: string | undefined;
+        let totalChecked = 0;
+        
+        // Search with posting filter - much more targeted
+        while (totalChecked < 1000) { // Can check more when filtered by posting
+          const response = await client.getOpportunities({ 
             posting_id: args.posting_id,
-            search_name: args.candidate_name,
-            found: matches.length > 0,
-            candidates: matches.map(formatOpportunity)
-          }, null, 2)
-        }]
-      };
+            stage_id: args.stage,
+            limit: 100,
+            offset
+          });
+          
+          if (!response.data || response.data.length === 0) break;
+          
+          totalChecked += response.data.length;
+          
+          // Check each candidate with flexible matching
+          for (const c of response.data) {
+            const cName = (c.name || "").toLowerCase();
+            // More flexible matching - split name into parts
+            const nameParts = nameLower.split(' ');
+            if (nameParts.some(part => cName.includes(part)) || nameLower.includes(cName) || cName.includes(nameLower)) {
+              matched.push(c);
+            }
+          }
+          
+          if (!response.hasNext) break;
+          
+          // Get next offset
+          const lastCandidate = response.data[response.data.length - 1];
+          offset = lastCandidate?.id;
+          if (!offset) break;
+        }
+        
+        const result: any = {
+          count: matched.length,
+          posting_id: args.posting_id,
+          total_checked: totalChecked,
+          query: args.name,
+          candidates: matched.map(formatOpportunity)
+        };
+        
+        if (matched.length === 0 && totalChecked > 0) {
+          result.note = `No matches found for '${args.name}' among ${totalChecked} candidates in this posting`;
+        }
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+          }]
+        };
+      }
     }
   );
 
@@ -141,36 +330,101 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
     "lever_find_internal_referrals_for_role",
     {
       posting_id: z.string(),
-      limit: z.number().default(50),
+      limit: z.number().default(100),
     },
     async (args) => {
-      const response = await client.getOpportunities({ 
-        posting_id: args.posting_id,
-        limit: 100 
-      });
-      
-      // Filter for internal referrals (usually tagged or have specific sources)
-      const referrals = response.data.filter(c => {
-        const tags = c.tags || [];
-        const origin = c.origin || '';
-        const sources = c.sources || [];
+      try {
+        // First get the posting details
+        const postingsResponse = await client.getPostings('published', 100);
+        const postings = postingsResponse.data || [];
         
-        return tags.some(tag => tag.toLowerCase().includes('referral')) ||
-               tags.some(tag => tag.toLowerCase().includes('internal')) ||
-               origin.toLowerCase().includes('referral') ||
-               sources.some(s => s.toLowerCase().includes('employee'));
-      });
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            posting_id: args.posting_id,
-            count: referrals.length,
-            internal_referrals: referrals.slice(0, args.limit).map(formatOpportunity)
-          }, null, 2)
-        }]
-      };
+        let targetPosting: any = null;
+        for (const posting of postings) {
+          if (posting.id === args.posting_id) {
+            targetPosting = posting;
+            break;
+          }
+        }
+        
+        if (!targetPosting) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: `Posting ${args.posting_id} not found` })
+            }]
+          };
+        }
+        
+        const postingTitle = targetPosting.text || "";
+        const postingTeam = targetPosting.team?.text || "";
+        
+        // Search for candidates who might be good referral sources
+        // Fetch all candidates with limit
+        const response = await client.getOpportunities({ 
+          limit: args.limit * 2  // Fetch more to filter
+        });
+        
+        const candidates = response.data || [];
+        
+        // Filter for likely employees who could refer
+        const potentialReferrers: any[] = [];
+        
+        for (const candidate of candidates) {
+          const tags = (candidate.tags || []).map((t: string) => t.toLowerCase());
+          const headline = (candidate.headline || '').toLowerCase();
+          
+          // Check if they're marked as internal/employee
+          const isInternal = (
+            tags.includes('employee') ||
+            tags.includes('internal') ||
+            tags.some(tag => tag.includes('referral')) ||
+            headline.includes('current')
+          );
+          
+          // Check if they're in a related team/role
+          const isRelated = (
+            (postingTeam && headline.includes(postingTeam.toLowerCase())) ||
+            (postingTeam && tags.some(tag => tag.includes(postingTeam.toLowerCase()))) ||
+            postingTitle.toLowerCase().split(' ').some((keyword: string) => 
+              keyword.length > 3 && headline.includes(keyword)
+            )
+          );
+          
+          if (isInternal || isRelated) {
+            potentialReferrers.push({
+              ...candidate,
+              referral_relevance: isInternal ? "internal" : "related"
+            });
+          }
+        }
+        
+        // Limit results
+        const limitedReferrers = potentialReferrers.slice(0, args.limit);
+        
+        const results = {
+          count: limitedReferrers.length,
+          role: postingTitle,
+          team: postingTeam,
+          potential_referrers: limitedReferrers.map(c => ({
+            ...formatOpportunity(c),
+            relevance: c.referral_relevance || "unknown"
+          }))
+        };
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(results, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+          }]
+        };
+      }
     }
   );
 
@@ -182,55 +436,64 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
     },
     async (args) => {
       try {
-        const candidate = await client.getOpportunity(args.opportunity_id);
+        // Try both endpoints - files and resumes
+        const allFiles: any[] = [];
         
-        // Extract file information from the candidate data
-        const files = [];
-        
-        // Check for resume
-        if (candidate.resume) {
-          files.push({
-            type: 'resume',
-            name: 'Resume',
-            id: candidate.resumeId || 'resume',
-            size: 'N/A',
-            uploaded: candidate.createdAt ? new Date(candidate.createdAt).toISOString() : 'Unknown'
-          });
+        // Try files endpoint
+        try {
+          const filesResponse = await client.getOpportunityFiles(args.opportunity_id);
+          const files = filesResponse.data || [];
+          for (const f of files) {
+            f.source = "files";
+          }
+          allFiles.push(...files);
+        } catch (filesError) {
+          // Continue even if files endpoint fails
         }
         
-        // Check for other files in the files array
-        if (candidate.files && Array.isArray(candidate.files)) {
-          candidate.files.forEach(file => {
-            files.push({
-              type: file.type || 'document',
-              name: file.name || 'Unnamed file',
-              id: file.id,
-              size: file.size || 'N/A',
-              uploaded: file.uploadedAt || 'Unknown'
-            });
-          });
+        // Try resumes endpoint
+        try {
+          const resumesResponse = await client.getOpportunityResumes(args.opportunity_id);
+          const resumes = resumesResponse.data || [];
+          for (const r of resumes) {
+            r.source = "resumes";
+          }
+          allFiles.push(...resumes);
+        } catch (resumesError) {
+          // Continue even if resumes endpoint fails
         }
-
+        
+        // Get candidate info for context
+        const oppResponse = await client.getOpportunity(args.opportunity_id);
+        const opportunity = oppResponse.data;
+        
+        const results = {
+          candidate: opportunity.name || "Unknown",
+          file_count: allFiles.length,
+          files: allFiles.map(f => ({
+            id: f.id || "",
+            filename: f.file?.name || f.name || f.filename || "Unknown",
+            type: f.file?.ext || f.type || f.mimetype || "Unknown",
+            size: f.file?.size || f.size || 0,
+            uploaded_at: f.createdAt ? 
+              new Date(f.createdAt).toISOString().replace('T', ' ').substring(0, 16) : 
+              "Unknown",
+            download_url: f.file?.downloadUrl || f.downloadUrl || f.url || "",
+            source: f.source || "unknown"
+          }))
+        };
+        
         return {
           content: [{
             type: "text",
-            text: JSON.stringify({
-              opportunity_id: args.opportunity_id,
-              candidate_name: candidate.name || 'Unknown',
-              file_count: files.length,
-              files: files,
-              note: "Files cannot be downloaded through MCP. Access them through the Lever web interface."
-            }, null, 2)
+            text: JSON.stringify(results, null, 2)
           }]
         };
       } catch (error) {
         return {
           content: [{
             type: "text",
-            text: JSON.stringify({
-              error: error instanceof Error ? error.message : 'Failed to get candidate files',
-              opportunity_id: args.opportunity_id
-            }, null, 2)
+            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
           }]
         };
       }
@@ -245,56 +508,40 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
     },
     async (args) => {
       try {
-        const candidate = await client.getOpportunity(args.opportunity_id);
+        // Get candidate info
+        const oppResponse = await client.getOpportunity(args.opportunity_id);
+        const opportunity = oppResponse.data;
         
-        // Extract application information
-        const applications = [];
+        // Get applications
+        const response = await client.getOpportunityApplications(args.opportunity_id);
+        const applications = response.data || [];
         
-        // Primary application
-        if (candidate.posting) {
-          applications.push({
-            id: candidate.id,
-            posting: candidate.posting.text || 'Unknown Position',
-            posting_id: candidate.posting.id || '',
-            stage: typeof candidate.stage === 'object' ? candidate.stage.text : String(candidate.stage || 'Unknown'),
-            applied_at: candidate.createdAt ? new Date(candidate.createdAt).toISOString() : 'Unknown',
-            status: 'active'
-          });
-        }
+        const results = {
+          candidate: opportunity.name || "Unknown",
+          application_count: applications.length,
+          applications: applications.map((app: any) => ({
+            id: app.id || "",
+            posting: app.posting?.text || "Unknown",
+            posting_id: app.posting?.id || "",
+            status: app.status || "Unknown",
+            created_at: app.createdAt ? 
+              new Date(app.createdAt).toISOString().replace('T', ' ').substring(0, 16) : 
+              "Unknown",
+            user: app.user?.name || "System"
+          }))
+        };
         
-        // Check for other applications in the applications array
-        if (candidate.applications && Array.isArray(candidate.applications)) {
-          candidate.applications.forEach(app => {
-            applications.push({
-              id: app.id,
-              posting: app.posting?.text || 'Unknown Position',
-              posting_id: app.posting?.id || '',
-              stage: app.stage?.text || 'Unknown',
-              applied_at: app.createdAt || 'Unknown',
-              status: app.archived ? 'archived' : 'active'
-            });
-          });
-        }
-
         return {
           content: [{
             type: "text",
-            text: JSON.stringify({
-              opportunity_id: args.opportunity_id,
-              candidate_name: candidate.name || 'Unknown',
-              application_count: applications.length,
-              applications: applications
-            }, null, 2)
+            text: JSON.stringify(results, null, 2)
           }]
         };
       } catch (error) {
         return {
           content: [{
             type: "text",
-            text: JSON.stringify({
-              error: error instanceof Error ? error.message : 'Failed to get applications',
-              opportunity_id: args.opportunity_id
-            }, null, 2)
+            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
           }]
         };
       }
@@ -306,41 +553,47 @@ export function registerAdditionalTools(server: McpServer, client: LeverClient) 
     "lever_get_application",
     {
       opportunity_id: z.string(),
-      application_id: z.string().optional(),
+      application_id: z.string(),
     },
     async (args) => {
       try {
-        const candidate = await client.getOpportunity(args.opportunity_id);
+        // Get application details
+        const application = await client.getApplication(args.opportunity_id, args.application_id);
+        
+        // Get candidate info for context
+        const oppResponse = await client.getOpportunity(args.opportunity_id);
+        const opportunity = oppResponse.data;
+        
+        const result = {
+          candidate: opportunity.name || "Unknown",
+          application: {
+            id: application.id || "",
+            posting: {
+              id: application.posting?.id || "",
+              title: application.posting?.text || "Unknown",
+              team: application.posting?.team?.text || "Unknown"
+            },
+            status: application.status || "Unknown",
+            created_at: application.createdAt ? 
+              new Date(application.createdAt).toISOString().replace('T', ' ').substring(0, 16) : 
+              "Unknown",
+            created_by: application.user?.name || "System",
+            type: application.type || "Unknown",
+            posting_owner: application.postingOwner?.name || "Unknown"
+          }
+        };
         
         return {
           content: [{
             type: "text",
-            text: JSON.stringify({
-              application: {
-                id: candidate.id,
-                candidate_name: candidate.name || 'Unknown',
-                email: candidate.emails?.[0] || 'N/A',
-                posting: candidate.posting?.text || 'Unknown Position',
-                posting_id: candidate.posting?.id || '',
-                stage: typeof candidate.stage === 'object' ? candidate.stage.text : String(candidate.stage || 'Unknown'),
-                location: typeof candidate.location === 'object' ? candidate.location.name : String(candidate.location || 'Unknown'),
-                applied_at: candidate.createdAt ? new Date(candidate.createdAt).toISOString() : 'Unknown',
-                last_updated: candidate.updatedAt ? new Date(candidate.updatedAt).toISOString() : 'Unknown',
-                tags: candidate.tags || [],
-                sources: candidate.sources || [],
-                origin: candidate.origin || 'Unknown'
-              }
-            }, null, 2)
+            text: JSON.stringify(result, null, 2)
           }]
         };
       } catch (error) {
         return {
           content: [{
             type: "text",
-            text: JSON.stringify({
-              error: error instanceof Error ? error.message : 'Failed to get application details',
-              opportunity_id: args.opportunity_id
-            }, null, 2)
+            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
           }]
         };
       }

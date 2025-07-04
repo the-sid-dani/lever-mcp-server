@@ -2,8 +2,8 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LeverClient } from "./lever/client";
-import type { LeverOpportunity } from "./types/lever";
-import { registerAdditionalTools, formatOpportunity as formatOpp } from "./additional-tools";
+import type { LeverOpportunity, LeverPosting } from "./types/lever";
+import { registerAdditionalTools } from "./additional-tools";
 
 // Environment interface
 interface Env {
@@ -50,6 +50,18 @@ function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
     location,
     organizations: opp.headline || '',
     created: createdDate
+  };
+}
+
+// Helper to format posting data
+function formatPosting(posting: LeverPosting): Record<string, any> {
+  return {
+    id: posting.id || "",
+    title: posting.text || "Unknown",
+    state: posting.state || "Unknown",
+    location: posting.location?.name || "Unknown",
+    team: posting.team?.text || "Unknown",
+    url: posting.urls?.show || ""
   };
 }
 
@@ -102,67 +114,103 @@ export class LeverMCP extends McpAgent {
           const tagList = args.tags ? args.tags.split(',').map(t => t.trim().toLowerCase()) : [];
 
           const allCandidates: LeverOpportunity[] = [];
-          let offset: string | undefined ;
+          let offset: string | undefined;
           const maxFetch = Math.min(args.limit * 10, 1000);
 
           // Fetch candidates with pagination
           while (allCandidates.length < maxFetch) {
-            // Add delay for rate limiting (except first request)
-            if (offset) {
-              await new Promise(resolve => setTimeout(resolve, 200));
+            // Add delay between requests to avoid rate limiting
+            if (offset !== undefined) {  // Not the first request
+              await new Promise(resolve => setTimeout(resolve, 200));  // 200ms delay = max 5 requests/second
             }
 
             const response = await this.client.getOpportunities({
               stage_id: args.stage,
               posting_id: args.posting_id,
-              tag: args.tags ? args.tags.split(',')[0] : undefined,
+              tag: args.tags ? args.tags.split(',')[0] : undefined,  // API only supports single tag
               limit: 100,
               offset
             });
 
-            const candidates = response.data;
+            const candidates = response.data || [];
             
             // Filter candidates based on criteria
             const filteredCandidates = candidates.filter(c => {
               if (!c || typeof c !== 'object') return false;
 
-              // Prepare candidate data for matching
+              // Convert candidate data to lowercase for comparison
               const cName = (c.name || '').toLowerCase();
-              const cEmails = (c.emails || []).map(e => e.toLowerCase());
-              const cTags = (c.tags || []).map(t => t.toLowerCase());
-              const cLocation = typeof c.location === 'object' ? 
-                (c.location.name || '').toLowerCase() : 
-                (c.location || '').toLowerCase();
-              const cHeadline = (c.headline || '').toLowerCase();
-              const cOrganizations = Array.isArray(c.organizations) ? 
-                c.organizations.map(o => o.toLowerCase()) : [];
+              const cEmails = c.emails || [];
+              if (!Array.isArray(cEmails)) {
+                return false;  // Skip invalid data
+              }
+              const cEmailsLower = cEmails.map(e => typeof e === 'string' ? e.toLowerCase() : '');
+              
+              const cTags = c.tags || [];
+              if (!Array.isArray(cTags)) {
+                return false;  // Skip invalid data
+              }
+              const cTagsLower = cTags.map(t => typeof t === 'string' ? t.toLowerCase() : '');
+              
+              const cLocation = c.location || '';
+              let cLocationStr = '';
+              if (typeof cLocation === 'object' && cLocation) {
+                cLocationStr = (cLocation.name || '').toLowerCase();
+              } else {
+                cLocationStr = String(cLocation).toLowerCase();
+              }
+              
+              // Get company info from headline field
+              const cHeadline = String(c.headline || '').toLowerCase();
+              const cOrganizations = c.organizations || [];
+              let cOrganizationsLower: string[] = [];
+              if (Array.isArray(cOrganizations)) {
+                cOrganizationsLower = cOrganizations.map(o => String(o).toLowerCase());
+              } else if (typeof cOrganizations === 'string') {
+                cOrganizationsLower = [(cOrganizations as string).toLowerCase()];
+              }
               
               // Combine all text for skills search
-              const cAllText = `${cName} ${cEmails.join(' ')} ${cTags.join(' ')} ${cHeadline} ${cOrganizations.join(' ')}`.toLowerCase();
+              let cAllText = `${cName} ${cEmailsLower.join(' ')} ${cTagsLower.join(' ')} ${cHeadline} ${cOrganizationsLower.join(' ')}`.toLowerCase();
+              
+              // Also check if resume exists for more comprehensive searching
+              const cResume = String(c.resume || '').toLowerCase();
+              if (cResume) {
+                cAllText += ` ${cResume}`;
+              }
 
               // Check each criteria
+              // Company match: check in headline (primary) or organizations
               const companyMatch = !companyList.length || 
                 companyList.some(comp => cHeadline.includes(comp) || 
-                cOrganizations.some(org => org.includes(comp)));
+                cOrganizationsLower.some(org => org.includes(comp)));
 
+              // Skills match: ANY skill match (OR logic)
               const skillMatch = !skillList.length || 
                 skillList.some(skill => cAllText.includes(skill));
 
-              // Enhanced location matching for UK
+              // Location match: ANY location match (handle UK variations)
               const ukVariations = ['uk', 'united kingdom', 'england', 'scotland', 'wales', 'northern ireland', 'britain', 'gb'];
-              let locationMatch = !locationList.length;
+              let locationMatch = true;
               if (locationList.length) {
-                locationMatch = locationList.some(loc => {
-                  if (cLocation.includes(loc)) return true;
-                  if (['uk', 'united kingdom'].includes(loc)) {
-                    return ukVariations.some(ukVar => cLocation.includes(ukVar));
+                locationMatch = false;
+                for (const loc of locationList) {
+                  // Direct match
+                  if (cLocationStr.includes(loc)) {
+                    locationMatch = true;
+                    break;
                   }
-                  return false;
-                });
+                  // Check UK variations
+                  if (['uk', 'united kingdom'].includes(loc) && ukVariations.some(ukVar => cLocationStr.includes(ukVar))) {
+                    locationMatch = true;
+                    break;
+                  }
+                }
               }
 
+              // Tag match: ANY tag match
               const tagMatch = !tagList.length || 
-                tagList.some(tag => cTags.includes(tag));
+                tagList.some(tag => cTagsLower.includes(tag));
 
               return companyMatch && skillMatch && locationMatch && tagMatch;
             });
@@ -170,8 +218,13 @@ export class LeverMCP extends McpAgent {
             allCandidates.push(...filteredCandidates);
 
             if (!response.hasNext) break;
-            offset = response.next;
-            if (!offset) break;
+            
+            // Get next offset from the last item
+            if (candidates.length > 0) {
+              offset = candidates[candidates.length - 1].id;
+            } else {
+              break;
+            }
           }
 
           // Limit final results
@@ -195,12 +248,21 @@ export class LeverMCP extends McpAgent {
             }]
           };
         } catch (error) {
+          // Return a proper response structure even on error
           return {
             content: [{
               type: "text",
               text: JSON.stringify({
-                error: error instanceof Error ? error.message : 'Unknown error',
+                error: error instanceof Error ? error.message : String(error),
                 count: 0,
+                search_criteria: {
+                  companies: args.companies,
+                  skills: args.skills,
+                  locations: args.locations,
+                  stage: args.stage,
+                  tags: args.tags,
+                  posting: args.posting_id
+                },
                 candidates: []
               }, null, 2)
             }]
@@ -218,30 +280,114 @@ export class LeverMCP extends McpAgent {
         limit: z.number().default(100),
       },
       async (args) => {
-        const companies = args.companies.split(',').map(c => c.trim().toLowerCase());
-        const response = await this.client.getOpportunities({ limit: 100 });
-        
-        const matches = response.data.filter(c => {
-          const headline = (c.headline || '').toLowerCase();
-          const orgs = Array.isArray(c.organizations) ? 
-            c.organizations.map(o => o.toLowerCase()) : [];
+        try {
+          // Parse company list
+          const companyList = args.companies.split(',').map(c => c.trim());
           
-          return companies.some(comp => 
-            headline.includes(comp) || 
-            orgs.some(org => org.includes(comp))
-          );
-        });
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              count: matches.length,
-              companies: args.companies,
-              candidates: matches.slice(0, args.limit).map(formatOpportunity)
-            }, null, 2)
-          }]
-        };
+          // Search for candidates from each company
+          const allCandidates: any[] = [];
+          const seenIds = new Set<string>();
+          
+          // Fetch candidates and filter by company
+          let offset: string | undefined;
+          let totalFetched = 0;
+          const maxFetch = Math.min(args.limit * 5, 500); // Fetch more to ensure we get enough matches
+          
+          while (totalFetched < maxFetch) {
+            const response = await this.client.getOpportunities({ 
+              limit: 100,
+              offset
+            });
+            
+            const candidates = response.data || [];
+            if (candidates.length === 0) break;
+            
+            totalFetched += candidates.length;
+            
+            // Filter to ensure company match in headline
+            for (const candidate of candidates) {
+              const headline = (candidate.headline || '').toLowerCase();
+              const tags = (candidate.tags || []).map((t: string) => t.toLowerCase());
+              
+              // Check for company match
+              let companyFound = false;
+              let matchedCompany = '';
+              
+              for (const company of companyList) {
+                const companyLower = company.toLowerCase();
+                
+                if (headline) {
+                  // Split headline by comma to get individual companies
+                  const headlineCompanies = headline.split(',').map(c => c.trim());
+                  for (const hc of headlineCompanies) {
+                    if (companyLower.includes(hc) || hc.includes(companyLower)) {
+                      companyFound = true;
+                      matchedCompany = company;
+                      break;
+                    }
+                  }
+                }
+                
+                if (!companyFound && tags.some(tag => tag.includes(companyLower))) {
+                  companyFound = true;
+                  matchedCompany = company;
+                }
+                
+                if (companyFound) break;
+              }
+              
+              // Add to results if company match found and not duplicate
+              if (companyFound && !seenIds.has(candidate.id)) {
+                seenIds.add(candidate.id);
+                allCandidates.push({
+                  ...candidate,
+                  matched_company: matchedCompany,
+                  full_headline: candidate.headline || ''
+                });
+              }
+            }
+            
+            // Check if we have enough results
+            if (allCandidates.length >= args.limit) break;
+            
+            if (!response.hasNext) break;
+            
+            // Get next offset
+            if (candidates.length > 0) {
+              offset = candidates[candidates.length - 1].id;
+            } else {
+              break;
+            }
+          }
+          
+          // Limit results
+          const uniqueCandidates = allCandidates.slice(0, args.limit);
+          
+          const results = {
+            count: uniqueCandidates.length,
+            searched_companies: companyList,
+            current_employees_only: args.current_only,
+            candidates: uniqueCandidates.map(c => ({
+              ...formatOpportunity(c),
+              matched_company: c.matched_company || "Unknown",
+              all_organizations: c.full_headline || c.headline || ""
+            }))
+          };
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(results, null, 2)
+            }]
+          };
+        } catch (error) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+            }]
+          };
+        }
       }
     );
   }
@@ -255,7 +401,8 @@ export class LeverMCP extends McpAgent {
       },
       async (args) => {
         try {
-          const opportunity = await this.client.getOpportunity(args.opportunity_id);
+          const response = await this.client.getOpportunity(args.opportunity_id);
+          const opportunity = response.data;
           
           // Extract basic info
           const name = opportunity.name || "Unknown";
@@ -377,22 +524,29 @@ export class LeverMCP extends McpAgent {
       "lever_list_open_roles",
       {},
       async () => {
-        const response = await this.client.getPostings();
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              count: response.data.length,
-              roles: response.data.map(p => ({
-                id: p.id,
-                title: p.text,
-                state: p.state,
-                location: p.location?.name || 'Unknown',
-                team: p.team?.text || 'Unknown'
-              }))
-            }, null, 2)
-          }]
-        };
+        try {
+          const response = await this.client.getPostings('published', 50);
+          
+          const results = {
+            count: response.data.length,
+            hasMore: response.hasNext || false,
+            roles: response.data.map(formatPosting)
+          };
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(results, null, 2)
+            }]
+          };
+        } catch (error) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+            }]
+          };
+        }
       }
     );
 
