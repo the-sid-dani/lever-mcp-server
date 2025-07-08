@@ -67,10 +67,22 @@ export class LeverClient {
 						return this.makeRequest<T>(method, endpoint, params, body, retryCount + 1);
 					}
 					
+					// Log 404 errors specifically
+					if (response.status === 404) {
+						console.error(`Lever API 404: Resource not found at ${endpoint}`);
+					}
+					
 					throw new Error(`Lever API error: ${response.status} - ${errorText}`);
 				}
 
-				return response.json();
+				const responseData = await response.json();
+				
+				// Log if we get an empty response
+				if (!responseData || (typeof responseData === 'object' && Object.keys(responseData).length === 0)) {
+					console.warn(`Empty response from Lever API for ${endpoint}`);
+				}
+				
+				return responseData;
 			} catch (error) {
 				// Retry on network errors
 				if (retryCount < 2 && error instanceof TypeError && error.message.includes('fetch')) {
@@ -107,8 +119,15 @@ export class LeverClient {
 				"GET",
 				`/opportunities/${id}`,
 			);
+			
+			// Check if the API returned null or undefined
+			if (!opportunity) {
+				console.error(`API returned null/undefined for opportunity ${id}`);
+				throw new Error(`Opportunity ${id} not found - API returned empty response`);
+			}
+			
 			// Log successful fetch for debugging
-			console.log(`Successfully fetched opportunity ${id}`);
+			console.log(`Successfully fetched opportunity ${id}, has data: ${!!opportunity.id}`);
 			return { data: opportunity };
 		} catch (error) {
 			console.error(`Failed to fetch opportunity ${id}:`, error);

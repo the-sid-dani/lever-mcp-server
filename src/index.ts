@@ -519,6 +519,12 @@ export class LeverMCP extends McpAgent {
 					const opportunity = response.data;
 					console.log(`Opportunity data:`, JSON.stringify(opportunity).slice(0, 200));
 
+					// Check if the opportunity object is empty or has no ID
+					if (!opportunity.id || Object.keys(opportunity).length === 0) {
+						console.error(`Empty opportunity object returned for ${args.opportunity_id}`);
+						throw new Error(`Candidate ${args.opportunity_id} not found or data is empty`);
+					}
+
 					// Extract basic info
 					const name = opportunity.name || "Unknown";
 					const emails = opportunity.emails || [];
@@ -770,6 +776,61 @@ export class LeverMCP extends McpAgent {
 				};
 			}
 		});
+
+		// Debug get candidate - returns raw response
+		this.server.tool(
+			"debug_get_candidate",
+			{
+				opportunity_id: z.string(),
+			},
+			async (args) => {
+				try {
+					console.log(`DEBUG: Fetching raw data for candidate ${args.opportunity_id}`);
+					
+					// Make a direct API call to see what we get back
+					const response = await this.client.getOpportunity(args.opportunity_id);
+					
+					console.log(`DEBUG: Raw response:`, JSON.stringify(response));
+					
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									debug_info: {
+										opportunity_id: args.opportunity_id,
+										response_exists: !!response,
+										data_exists: !!response?.data,
+										data_type: typeof response?.data,
+										data_keys: response?.data ? Object.keys(response.data) : [],
+										has_id: !!response?.data?.id,
+										id_value: response?.data?.id || "NO_ID",
+										raw_data: response
+									}
+								}, null, 2),
+							},
+						],
+					};
+				} catch (error) {
+					console.error(`DEBUG: Error fetching candidate:`, error);
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									debug_error: {
+										opportunity_id: args.opportunity_id,
+										error_message: error instanceof Error ? error.message : String(error),
+										error_type: error?.constructor?.name || "Unknown",
+										error_stack: error instanceof Error ? error.stack : undefined
+									}
+								}, null, 2),
+							},
+						],
+					};
+				}
+			},
+		);
 
 		// Find candidates for role
 		this.server.tool(
