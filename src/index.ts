@@ -141,6 +141,7 @@ export class LeverMCP extends McpAgent {
 					let totalScanned = 0; // Track how many candidates we've looked at
 					let totalFetched = 0; // Track how many candidates we fetched from API
 					let totalProcessed = 0; // Track how many we actually filtered/examined
+					let earlyExit = false; // Track if we exited early
 					const startTime = Date.now();
 					const maxExecutionTime = 60000; // Increased from 25s to 60s - well within Cloudflare's 5min limit
 					let apiCallCount = 0; // Track API calls to prevent hitting subrequest limit
@@ -150,6 +151,7 @@ export class LeverMCP extends McpAgent {
 						// Check for timeout BEFORE processing
 						if (Date.now() - startTime > maxExecutionTime) {
 							console.warn(`Timeout before processing batch ${apiCallCount}`);
+							earlyExit = true;
 							break;
 						}
 						// Add delay between requests to avoid rate limiting
@@ -167,18 +169,40 @@ export class LeverMCP extends McpAgent {
 						});
 
 						apiCallCount++; // Increment API call counter
+						
+						// Verify response structure
+						if (!response || !response.data || !Array.isArray(response.data)) {
+							console.error(`Invalid API response structure for batch ${apiCallCount}:`, response);
+							break;
+						}
+						
 						const candidates = response.data || [];
 						totalFetched += candidates.length; // Track what we fetched
 						console.log(`API call ${apiCallCount}: Fetched ${candidates.length} candidates, total fetched: ${totalFetched}`);
 						
-						// Check for timeout to prevent connection errors
+						// Sample log to verify we're getting real data
+						if (candidates.length > 0) {
+							console.log(`Sample from batch ${apiCallCount}: First candidate ID: ${candidates[0].id}, Name: ${candidates[0].name || 'NO_NAME'}`);
+							if (candidates.length > 1) {
+								console.log(`Last candidate in batch: ID: ${candidates[candidates.length - 1].id}, Name: ${candidates[candidates.length - 1].name || 'NO_NAME'}`);
+							}
+						}
+						
+						// Check for timeout BEFORE processing
 						if (Date.now() - startTime > maxExecutionTime) {
-							console.warn(`Advanced search timeout after ${Date.now() - startTime}ms`);
+							console.warn(`Timeout before processing batch ${apiCallCount}`);
+							earlyExit = true;
 							break;
 						}
 
+						// Log the start of filtering
+						console.log(`Starting to filter batch ${apiCallCount} with ${candidates.length} candidates`);
+						const filterStartTime = Date.now();
+						let candidatesExamined = 0; // Track per batch
+
 						// Filter candidates based on criteria
 						const filteredCandidates = candidates.filter((c) => {
+							candidatesExamined++; // Count each candidate we actually look at
 							if (!c || typeof c !== "object") return false;
 
 							// Convert candidate data to lowercase for comparison
@@ -280,14 +304,20 @@ export class LeverMCP extends McpAgent {
 							return companyMatch && skillMatch && locationMatch && tagMatch;
 						});
 
+						// Log filtering completion
+						const filterTime = Date.now() - filterStartTime;
+						console.log(`Batch ${apiCallCount}: Filtered ${candidates.length} candidates in ${filterTime}ms, found ${filteredCandidates.length} matches`);
+						console.log(`Actually examined ${candidatesExamined} candidates in this batch`);
+
 						// NOW count the candidates we actually examined
-						totalProcessed += candidates.length; // We processed this entire batch
+						totalProcessed += candidatesExamined; // Use the actual count
 						totalScanned = totalProcessed; // Update the scanned count to match processed
 
 						totalMatches += filteredCandidates.length;
 						allCandidates.push(...filteredCandidates);
 						
 						console.log(`Batch ${apiCallCount}: Processed ${candidates.length} candidates, found ${filteredCandidates.length} matches`);
+						console.log(`Running totals - Fetched: ${totalFetched}, Processed: ${totalProcessed}, Matches: ${allCandidates.length}`);
 
 						if (!response.hasNext || !response.next) break;
 
@@ -342,6 +372,11 @@ export class LeverMCP extends McpAgent {
 						} else {
 							searchResult.warning = `Reached maximum search depth after scanning ${totalScanned} candidates. Found ${allCandidates.length} matches. There may be more candidates beyond this search depth.`;
 						}
+						
+						if (earlyExit && totalProcessed < totalFetched) {
+							searchResult.warning += ` Note: ${totalFetched - totalProcessed} candidates were fetched but not examined due to timeout.`;
+						}
+						
 						searchResult.recommendation = "To search deeper: 1) Use more specific criteria to narrow the search, 2) Try searching by specific companies or skills separately, or 3) Use email search if you have candidate emails.";
 					}
 
@@ -914,6 +949,71 @@ export class LeverMCP extends McpAgent {
 									avg_duration: Math.round(results.reduce((sum, r) => sum + r.duration, 0) / results.length),
 								},
 							}, null, 2),
+						},
+					],
+				};
+			},
+		);
+
+		// Verify API response tool - check what the API actually returns
+		this.server.tool(
+			"verify_api_response",
+			{
+				batches: z.number().default(3).describe("Number of API batches to fetch (max 5)"),
+			},
+			async (args) => {
+				const results: any[] = [];
+				let offset: string | undefined;
+				const batchCount = Math.min(args.batches, 5); // Limit to 5 batches
+				
+				for (let i = 0; i < batchCount; i++) {
+					const response = await this.client.getOpportunities({
+						limit: 100,
+						offset,
+					});
+					
+					const batchResult = {
+						batch: i + 1,
+						requested_limit: 100,
+						actual_count: response.data ? response.data.length : 0,
+						has_data: !!response.data,
+						is_array: Array.isArray(response.data),
+						hasNext: response.hasNext,
+						next_offset: response.next,
+						sample_ids: [] as string[],
+						sample_names: [] as string[],
+					};
+					
+					if (response.data && response.data.length > 0) {
+						// Get first, middle, and last candidate as samples
+						const samples = [
+							response.data[0],
+							response.data[Math.floor(response.data.length / 2)],
+							response.data[response.data.length - 1]
+						];
+						
+						batchResult.sample_ids = samples.map(s => s.id);
+						batchResult.sample_names = samples.map(s => s.name || 'NO_NAME');
+					}
+					
+					results.push(batchResult);
+					
+					if (!response.hasNext || !response.next) break;
+					offset = response.next;
+				}
+				
+				const summary = {
+					total_batches: results.length,
+					total_candidates_fetched: results.reduce((sum, r) => sum + r.actual_count, 0),
+					all_batches_returned_100: results.every(r => r.actual_count === 100),
+					batches: results,
+				};
+				
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(summary, null, 2),
 						},
 					],
 				};
