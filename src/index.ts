@@ -133,16 +133,18 @@ export class LeverMCP extends McpAgent {
 
 					const allCandidates: LeverOpportunity[] = [];
 					let offset: string | undefined;
-					// Increase maxFetch to search more comprehensively - limit to 10x the requested limit or 1000 max
-					// This ensures we don't miss candidates while still having a reasonable limit
-					const maxFetch = Math.min(args.limit * 10, 1000); 
+					// Reduce maxFetch to stay within Cloudflare's free plan 50 subrequest limit
+					// Each API call counts as a subrequest, and we fetch 100 candidates per call
+					// So we can make at most 45 API calls (leaving 5 for other operations)
+					const maxFetch = Math.min(args.limit * 10, 1000, 4500); // Max 4500 candidates = 45 API calls
 					let totalMatches = 0; // Track total matches for pagination info
 					let totalScanned = 0; // Track how many candidates we've looked at
 					const startTime = Date.now();
 					const maxExecutionTime = 60000; // Increased from 25s to 60s - well within Cloudflare's 5min limit
+					let apiCallCount = 0; // Track API calls to prevent hitting subrequest limit
 
 					// Fetch candidates with pagination
-					while (allCandidates.length < maxFetch) {
+					while (allCandidates.length < maxFetch && apiCallCount < 45) { // Limit to 45 API calls
 						// Check for timeout to prevent connection errors
 						if (Date.now() - startTime > maxExecutionTime) {
 							console.warn(`Advanced search timeout after ${Date.now() - startTime}ms`);
@@ -162,6 +164,7 @@ export class LeverMCP extends McpAgent {
 							offset,
 						});
 
+						apiCallCount++; // Increment API call counter
 						const candidates = response.data || [];
 						totalScanned += candidates.length; // Track how many we've looked at
 
@@ -313,10 +316,14 @@ export class LeverMCP extends McpAgent {
 					};
 
 					// Add warning if search was incomplete
-					if (wasTimeout || allCandidates.length >= maxFetch) {
-						searchResult.warning = wasTimeout 
-							? `Search stopped after scanning ${totalScanned} candidates (${Math.round(executionTime / 1000)}s). Found ${allCandidates.length} matches. More candidates may exist beyond this point.`
-							: `Reached maximum search depth after scanning ${totalScanned} candidates. Found ${allCandidates.length} matches. There may be more candidates beyond this search depth.`;
+					if (wasTimeout || allCandidates.length >= maxFetch || apiCallCount >= 45) {
+						if (apiCallCount >= 45) {
+							searchResult.warning = `Search limited by Cloudflare Workers free plan (50 subrequest limit). Scanned ${totalScanned} candidates and found ${allCandidates.length} matches. Consider upgrading to Workers Paid plan for deeper searches.`;
+						} else if (wasTimeout) {
+							searchResult.warning = `Search stopped after scanning ${totalScanned} candidates (${Math.round(executionTime / 1000)}s). Found ${allCandidates.length} matches. More candidates may exist beyond this point.`;
+						} else {
+							searchResult.warning = `Reached maximum search depth after scanning ${totalScanned} candidates. Found ${allCandidates.length} matches. There may be more candidates beyond this search depth.`;
+						}
 						searchResult.recommendation = "To search deeper: 1) Use more specific criteria to narrow the search, 2) Try searching by specific companies or skills separately, or 3) Use email search if you have candidate emails.";
 					}
 
