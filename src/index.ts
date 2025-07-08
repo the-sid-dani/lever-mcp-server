@@ -505,10 +505,19 @@ export class LeverMCP extends McpAgent {
 			},
 			async (args) => {
 				try {
+					console.log(`Fetching candidate ${args.opportunity_id}`);
 					const response = await this.client.getOpportunity(
 						args.opportunity_id,
 					);
+					
+					// Check if response and data exist
+					if (!response || !response.data) {
+						console.error(`No data returned for candidate ${args.opportunity_id}`);
+						throw new Error(`Candidate ${args.opportunity_id} not found`);
+					}
+					
 					const opportunity = response.data;
+					console.log(`Opportunity data:`, JSON.stringify(opportunity).slice(0, 200));
 
 					// Extract basic info
 					const name = opportunity.name || "Unknown";
@@ -586,16 +595,20 @@ export class LeverMCP extends McpAgent {
 						],
 					};
 				} catch (error) {
+					console.error(`Error in lever_get_candidate:`, error);
+					const errorMessage = error instanceof Error ? error.message : String(error);
+					
+					// Provide more context in the error response
 					return {
 						content: [
 							{
 								type: "text",
 								text: JSON.stringify(
 									{
-										error:
-											error instanceof Error
-												? error.message
-												: "Failed to fetch candidate",
+										error: errorMessage,
+										opportunity_id: args.opportunity_id,
+										details: "Failed to fetch candidate details. Please check if the ID is valid and the candidate exists.",
+										hint: "Try searching for the candidate by name or email first to get the correct opportunity_id"
 									},
 									null,
 									2,
@@ -709,6 +722,53 @@ export class LeverMCP extends McpAgent {
 					},
 				],
 			};
+		});
+
+		// Test connection tool
+		this.server.tool("test_lever_connection", {}, async () => {
+			try {
+				console.log("Testing Lever API connection...");
+				
+				// Try to fetch a small number of opportunities to test the connection
+				const response = await this.client.getOpportunities({
+					limit: 1
+				});
+				
+				console.log("Connection test successful, response:", JSON.stringify(response).slice(0, 200));
+				
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								status: "success",
+								message: "Lever API connection is working",
+								test_results: {
+									api_responded: true,
+									candidates_found: response.data ? response.data.length : 0,
+									has_data: response.data && response.data.length > 0,
+									sample_id: response.data && response.data[0] ? response.data[0].id : null
+								}
+							}, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				console.error("Connection test failed:", error);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								status: "error",
+								message: "Lever API connection failed",
+								error: error instanceof Error ? error.message : String(error),
+								hint: "Please check your LEVER_API_KEY is correctly set"
+							}, null, 2),
+						},
+					],
+				};
+			}
 		});
 
 		// Find candidates for role

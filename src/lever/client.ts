@@ -102,11 +102,18 @@ export class LeverClient {
 	}
 
 	async getOpportunity(id: string): Promise<{ data: LeverOpportunity }> {
-		const opportunity = await this.makeRequest<LeverOpportunity>(
-			"GET",
-			`/opportunities/${id}`,
-		);
-		return { data: opportunity };
+		try {
+			const opportunity = await this.makeRequest<LeverOpportunity>(
+				"GET",
+				`/opportunities/${id}`,
+			);
+			// Log successful fetch for debugging
+			console.log(`Successfully fetched opportunity ${id}`);
+			return { data: opportunity };
+		} catch (error) {
+			console.error(`Failed to fetch opportunity ${id}:`, error);
+			throw error;
+		}
 	}
 
 	async addNote(
