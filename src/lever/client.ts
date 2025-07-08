@@ -115,20 +115,22 @@ export class LeverClient {
 
 	async getOpportunity(id: string): Promise<{ data: LeverOpportunity }> {
 		try {
-			const opportunity = await this.makeRequest<LeverOpportunity>(
+			// The API returns { data: opportunity } structure, so we expect that format
+			const response = await this.makeRequest<{ data: LeverOpportunity }>(
 				"GET",
 				`/opportunities/${id}`,
 			);
 			
 			// Check if the API returned null or undefined
-			if (!opportunity) {
+			if (!response || !response.data) {
 				console.error(`API returned null/undefined for opportunity ${id}`);
 				throw new Error(`Opportunity ${id} not found - API returned empty response`);
 			}
 			
 			// Log successful fetch for debugging
-			console.log(`Successfully fetched opportunity ${id}, has data: ${!!opportunity.id}`);
-			return { data: opportunity };
+			console.log(`Successfully fetched opportunity ${id}, has data: ${!!response.data}`);
+			console.log(`Opportunity data:`, JSON.stringify(response).substring(0, 200));
+			return response;
 		} catch (error) {
 			console.error(`Failed to fetch opportunity ${id}:`, error);
 			throw error;
