@@ -4,24 +4,55 @@ import type {
 	LeverPosting,
 } from "../types/lever";
 
+// Simple token bucket implementation for rate limiting
+class TokenBucket {
+	private tokens: number;
+	private lastRefill: number = Date.now();
+	
+	constructor(
+		private maxTokens: number = 15, // Allow some burst capacity
+		private refillRate: number = 8   // 8 tokens per second (below 10 req/s limit)
+	) {
+		this.tokens = maxTokens;
+	}
+	
+	async waitForToken(): Promise<void> {
+		this.refill();
+		
+		if (this.tokens < 1) {
+			// Calculate wait time needed for 1 token
+			const waitMs = ((1 - this.tokens) / this.refillRate) * 1000;
+			await new Promise(resolve => setTimeout(resolve, Math.ceil(waitMs)));
+			return this.waitForToken(); // Retry after waiting
+		}
+		
+		this.tokens -= 1;
+	}
+	
+	private refill(): void {
+		const now = Date.now();
+		const elapsedSeconds = (now - this.lastRefill) / 1000;
+		const tokensToAdd = elapsedSeconds * this.refillRate;
+		
+		this.tokens = Math.min(this.maxTokens, this.tokens + tokensToAdd);
+		this.lastRefill = now;
+	}
+}
+
 export class LeverClient {
 	private baseUrl = "https://api.lever.co/v1";
 	private requestQueue: Promise<any> = Promise.resolve();
 	private lastRequestTime = 0;
 	private minRequestInterval = 125; // 8 requests per second
+	private tokenBucket = new TokenBucket(); // Add token bucket for better rate limiting
 
 	constructor(private apiKey: string) {}
 
 	private async rateLimit(): Promise<void> {
-		const now = Date.now();
-		const timeSinceLastRequest = now - this.lastRequestTime;
-
-		if (timeSinceLastRequest < this.minRequestInterval) {
-			await new Promise((resolve) =>
-				setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest),
-			);
-		}
-
+		// Use token bucket instead of simple delay
+		await this.tokenBucket.waitForToken();
+		
+		// Still track last request time for logging
 		this.lastRequestTime = Date.now();
 	}
 
@@ -58,6 +89,23 @@ export class LeverClient {
 
 				if (!response.ok) {
 					const errorText = await response.text();
+					
+					// Handle rate limiting specifically
+					if (response.status === 429) {
+						const retryAfter = response.headers.get('Retry-After');
+						const waitTime = retryAfter 
+							? parseInt(retryAfter) * 1000 
+							: Math.min(Math.pow(2, retryCount) * 1000, 30000); // Max 30s
+						
+						console.error(`Rate limited (429). Waiting ${waitTime}ms before retry...`);
+						
+						if (retryCount < 3) {
+							await new Promise(resolve => setTimeout(resolve, waitTime));
+							return this.makeRequest<T>(method, endpoint, params, body, retryCount + 1);
+						}
+						
+						throw new Error(`Rate limit exceeded after ${retryCount} retries`);
+					}
 					
 					// Retry on server errors (5xx) but not client errors (4xx)
 					if (response.status >= 500 && retryCount < 2) {

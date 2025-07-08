@@ -787,6 +787,114 @@ export class LeverMCP extends McpAgent {
 			}
 		});
 
+		// Test rate limits tool - verify our rate limiting is working
+		this.server.tool(
+			"test_rate_limits",
+			{
+				requests: z.number().default(20).describe("Number of test requests to make"),
+				concurrent: z.boolean().default(false).describe("Run requests concurrently instead of sequentially"),
+			},
+			async (args) => {
+				const results: any[] = [];
+				const startTime = Date.now();
+				
+				if (args.concurrent) {
+					// Test concurrent requests
+					const promises = [];
+					for (let i = 0; i < args.requests; i++) {
+						promises.push(
+							(async (index) => {
+								const reqStart = Date.now();
+								try {
+									await this.client.getOpportunities({ limit: 1 });
+									return {
+										request: index + 1,
+										success: true,
+										duration: Date.now() - reqStart,
+										timestamp: Date.now() - startTime,
+									};
+								} catch (error) {
+									return {
+										request: index + 1,
+										success: false,
+										error: error instanceof Error ? error.message : String(error),
+										duration: Date.now() - reqStart,
+										timestamp: Date.now() - startTime,
+									};
+								}
+							})(i)
+						);
+					}
+					
+					results.push(...await Promise.all(promises));
+				} else {
+					// Test sequential requests
+					for (let i = 0; i < args.requests; i++) {
+						const reqStart = Date.now();
+						try {
+							await this.client.getOpportunities({ limit: 1 });
+							results.push({
+								request: i + 1,
+								success: true,
+								duration: Date.now() - reqStart,
+								timestamp: Date.now() - startTime,
+							});
+						} catch (error) {
+							results.push({
+								request: i + 1,
+								success: false,
+								error: error instanceof Error ? error.message : String(error),
+								duration: Date.now() - reqStart,
+								timestamp: Date.now() - startTime,
+							});
+						}
+					}
+				}
+				
+				const totalTime = Date.now() - startTime;
+				const successCount = results.filter(r => r.success).length;
+				const failureCount = results.filter(r => !r.success).length;
+				const actualRate = args.requests / (totalTime / 1000);
+				
+				// Calculate average delay between requests
+				const delays = [];
+				for (let i = 1; i < results.length; i++) {
+					delays.push(results[i].timestamp - results[i-1].timestamp);
+				}
+				const avgDelay = delays.length > 0 ? delays.reduce((a, b) => a + b, 0) / delays.length : 0;
+				
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								summary: {
+									total_requests: args.requests,
+									successful: successCount,
+									failed: failureCount,
+									total_time_seconds: Math.round(totalTime / 100) / 10,
+									actual_rate_per_second: Math.round(actualRate * 10) / 10,
+									average_delay_ms: Math.round(avgDelay),
+									execution_mode: args.concurrent ? "concurrent" : "sequential",
+								},
+								rate_limit_status: actualRate > 10 
+									? "⚠️ EXCEEDING LIMIT" 
+									: actualRate > 8 
+										? "⚡ Near limit" 
+										: "✅ Within safe limits",
+								errors: results.filter(r => !r.success),
+								timing_distribution: {
+									min_duration: Math.min(...results.map(r => r.duration)),
+									max_duration: Math.max(...results.map(r => r.duration)),
+									avg_duration: Math.round(results.reduce((sum, r) => sum + r.duration, 0) / results.length),
+								},
+							}, null, 2),
+						},
+					],
+				};
+			},
+		);
+
 		// Debug get candidate - returns raw response
 		this.server.tool(
 			"debug_get_candidate",
