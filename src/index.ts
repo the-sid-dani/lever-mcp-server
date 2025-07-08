@@ -371,7 +371,7 @@ export class LeverMCP extends McpAgent {
 			"lever_find_by_company",
 			{
 				companies: z.string(),
-				current_only: z.boolean().default(true),
+				current_only: z.boolean().default(false).describe("Filter to only current employees (default: false - searches all work history)"),
 				limit: z.number().default(200),
 				page: z.number().default(1).describe("Page number (1-based)"),
 			},
