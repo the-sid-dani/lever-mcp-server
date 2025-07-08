@@ -131,15 +131,23 @@ export class LeverMCP extends McpAgent {
 
 					const allCandidates: LeverOpportunity[] = [];
 					let offset: string | undefined;
-					const maxFetch = Math.min(args.limit * 10, 2000); // Increased to support more pages
+					// Reduce maxFetch to prevent timeouts - limit to 3x the requested limit or 500 max
+					const maxFetch = Math.min(args.limit * 3, 500); 
 					let totalMatches = 0; // Track total matches for pagination info
+					const startTime = Date.now();
+					const maxExecutionTime = 25000; // 25 seconds to stay under CF Worker limits
 
 					// Fetch candidates with pagination
 					while (allCandidates.length < maxFetch) {
+						// Check for timeout to prevent connection errors
+						if (Date.now() - startTime > maxExecutionTime) {
+							console.warn(`Advanced search timeout after ${Date.now() - startTime}ms`);
+							break;
+						}
 						// Add delay between requests to avoid rate limiting
 						if (offset !== undefined) {
-							// Not the first request
-							await new Promise((resolve) => setTimeout(resolve, 200)); // 200ms delay = max 5 requests/second
+							// Not the first request - increase delay for stability
+							await new Promise((resolve) => setTimeout(resolve, 300)); // 300ms delay = ~3 requests/second
 						}
 
 						const response = await this.client.getOpportunities({
@@ -277,31 +285,39 @@ export class LeverMCP extends McpAgent {
 					const totalPages = Math.ceil(allCandidates.length / args.limit);
 					const hasMore = page < totalPages;
 
+					// Check if search was incomplete
+					const executionTime = Date.now() - startTime;
+					const wasTimeout = executionTime > maxExecutionTime;
+					const searchResult: any = {
+						count: paginatedCandidates.length,
+						page: page,
+						total_matches: allCandidates.length,
+						total_pages: totalPages,
+						has_more: hasMore,
+						next_page: hasMore ? page + 1 : null,
+						search_criteria: {
+							companies: args.companies,
+							skills: args.skills,
+							locations: args.locations,
+							stage: args.stage,
+							tags: args.tags,
+							posting: args.posting_id,
+						},
+						candidates: paginatedCandidates.map(formatOpportunity),
+					};
+
+					// Add warning if search was incomplete
+					if (wasTimeout || allCandidates.length >= maxFetch) {
+						searchResult.warning = wasTimeout 
+							? `Search stopped after ${Math.round(executionTime / 1000)}s to prevent timeout. Results may be incomplete. Consider narrowing your search criteria.`
+							: `Search limited to ${maxFetch} candidates. More results may exist. Consider narrowing your search criteria.`;
+					}
+
 					return {
 						content: [
 							{
 								type: "text",
-								text: JSON.stringify(
-									{
-										count: paginatedCandidates.length,
-										page: page,
-										total_matches: allCandidates.length,
-										total_pages: totalPages,
-										has_more: hasMore,
-										next_page: hasMore ? page + 1 : null,
-										search_criteria: {
-											companies: args.companies,
-											skills: args.skills,
-											locations: args.locations,
-											stage: args.stage,
-											tags: args.tags,
-											posting: args.posting_id,
-										},
-										candidates: paginatedCandidates.map(formatOpportunity),
-									},
-									null,
-									2,
-								),
+								text: JSON.stringify(searchResult, null, 2),
 							},
 						],
 					};
