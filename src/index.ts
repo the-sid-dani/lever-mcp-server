@@ -139,7 +139,7 @@ export class LeverMCP extends McpAgent {
 					let totalMatches = 0; // Track total matches for pagination info
 					let totalScanned = 0; // Track how many candidates we've looked at
 					const startTime = Date.now();
-					const maxExecutionTime = 25000; // 25 seconds to stay under CF Worker limits
+					const maxExecutionTime = 60000; // Increased from 25s to 60s - well within Cloudflare's 5min limit
 
 					// Fetch candidates with pagination
 					while (allCandidates.length < maxFetch) {
