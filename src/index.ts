@@ -892,6 +892,86 @@ export class LeverMCP extends McpAgent {
 			},
 		);
 
+		// Debug opportunities list - check what's coming back
+		this.server.tool(
+			"debug_opportunities_list",
+			{
+				name_search: z.string().optional(),
+				limit: z.number().default(5),
+			},
+			async (args) => {
+				try {
+					console.log(`DEBUG: Fetching opportunities list`);
+					
+					// Get opportunities
+					const response = await this.client.getOpportunities({
+						limit: args.limit,
+					});
+					
+					console.log(`DEBUG: Raw opportunities response has ${response.data?.length || 0} items`);
+					
+					// Log the raw response
+					if (response.data && response.data.length > 0) {
+						console.log(`DEBUG: First opportunity raw:`, JSON.stringify(response.data[0]));
+					}
+					
+					// If searching by name, filter results
+					let opportunities = response.data || [];
+					if (args.name_search) {
+						const searchLower = args.name_search.toLowerCase();
+						opportunities = opportunities.filter(opp => {
+							const name = (opp.name || "").toLowerCase();
+							return name.includes(searchLower);
+						});
+					}
+					
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									debug_info: {
+										total_opportunities: response.data?.length || 0,
+										filtered_count: opportunities.length,
+										name_search: args.name_search || "none",
+										has_next: response.hasNext,
+										first_opportunity_keys: response.data?.[0] ? Object.keys(response.data[0]) : [],
+										opportunities: opportunities.slice(0, 3).map(opp => ({
+											id: opp.id,
+											name: opp.name || "NO_NAME",
+											name_exists: !!opp.name,
+											name_type: typeof opp.name,
+											email: opp.emails?.[0] || "NO_EMAIL", 
+											location: opp.location || "NO_LOCATION",
+											location_type: typeof opp.location,
+											headline: opp.headline || "NO_HEADLINE",
+											created: opp.createdAt ? new Date(opp.createdAt).toISOString() : "NO_DATE",
+											raw_snippet: JSON.stringify(opp).substring(0, 200)
+										}))
+									}
+								}, null, 2),
+							},
+						],
+					};
+				} catch (error) {
+					console.error(`DEBUG: Error fetching opportunities:`, error);
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									debug_error: {
+										error_message: error instanceof Error ? error.message : String(error),
+										error_type: error?.constructor?.name || "Unknown"
+									}
+								}, null, 2),
+							},
+						],
+					};
+				}
+			},
+		);
+
 		// Find candidates for role
 		this.server.tool(
 			"lever_find_candidates_for_role",

@@ -106,11 +106,18 @@ export class LeverClient {
 		limit?: number;
 		offset?: string;
 	}): Promise<LeverApiResponse<LeverOpportunity>> {
-		return this.makeRequest<LeverApiResponse<LeverOpportunity>>(
+		const response = await this.makeRequest<LeverApiResponse<LeverOpportunity>>(
 			"GET",
 			"/opportunities",
 			params,
 		);
+		
+		// Debug logging
+		if (response && response.data && response.data.length > 0) {
+			console.log(`getOpportunities: Got ${response.data.length} candidates, first has name: ${response.data[0].name || 'NO_NAME'}`);
+		}
+		
+		return response;
 	}
 
 	async getOpportunity(id: string): Promise<{ data: LeverOpportunity }> {

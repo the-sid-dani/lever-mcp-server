@@ -256,12 +256,29 @@ export function registerAdditionalTools(
 
 					if (!response.data || response.data.length === 0) break;
 
+					// Debug: Log first candidate to see structure
+					if (pagesChecked === 0 && response.data.length > 0) {
+						console.log("DEBUG quick_find: First candidate data:", JSON.stringify(response.data[0]).substring(0, 300));
+					}
+
 					// Quick scan for name matches
 					for (const c of response.data) {
+						// Check if we have valid data
+						if (!c || !c.id) {
+							console.warn("Quick find: Skipping candidate with no ID");
+							continue;
+						}
+						
 						const cName = (c.name || "").toLowerCase();
+						
+						// Debug log for specific names
+						if (cName && queryLower === "michael cox" && cName.includes("michael")) {
+							console.log(`DEBUG: Found Michael - Full candidate:`, JSON.stringify(c).substring(0, 300));
+						}
 
 						if (
 							queryLower &&
+							cName &&
 							(queryLower.includes(cName) || cName.includes(queryLower))
 						) {
 							matched.push(c);
