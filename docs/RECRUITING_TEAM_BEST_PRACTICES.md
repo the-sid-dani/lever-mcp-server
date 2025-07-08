@@ -70,6 +70,26 @@ major media agencies like GroupM or Publicis in London"
 - Scans up to **4,500 candidates** per search
 - For larger searches, break them into smaller chunks
 
+### 📊 Understanding Search Statistics
+
+When you see search results, pay attention to the statistics:
+
+```json
+"search_stats": {
+  "candidates_scanned": 3000,      // Actually examined
+  "candidates_fetched": 4500,      // Downloaded from database
+  "candidates_processed": 3000,    // Fully checked against criteria
+  "api_calls_made": 45,           // API requests made
+  "candidates_matched": 3,         // Matches found
+  "execution_time_seconds": 34    // Time taken
+}
+```
+
+**Important**: If `candidates_fetched` is higher than `candidates_processed`, it means:
+- The search timed out before examining all candidates
+- Some candidates were downloaded but not checked
+- Try narrowing your search for complete results
+
 ### 📊 Results Display
 - Claude can only display a limited number of results at once
 - Ask for "top 20" or "first 10" to keep responses manageable

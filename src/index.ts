@@ -139,15 +139,17 @@ export class LeverMCP extends McpAgent {
 					const maxFetch = Math.min(args.limit * 10, 1000, 4500); // Max 4500 candidates = 45 API calls
 					let totalMatches = 0; // Track total matches for pagination info
 					let totalScanned = 0; // Track how many candidates we've looked at
+					let totalFetched = 0; // Track how many candidates we fetched from API
+					let totalProcessed = 0; // Track how many we actually filtered/examined
 					const startTime = Date.now();
 					const maxExecutionTime = 60000; // Increased from 25s to 60s - well within Cloudflare's 5min limit
 					let apiCallCount = 0; // Track API calls to prevent hitting subrequest limit
 
 					// Fetch candidates with pagination
 					while (allCandidates.length < maxFetch && apiCallCount < 45) { // Limit to 45 API calls
-						// Check for timeout to prevent connection errors
+						// Check for timeout BEFORE processing
 						if (Date.now() - startTime > maxExecutionTime) {
-							console.warn(`Advanced search timeout after ${Date.now() - startTime}ms`);
+							console.warn(`Timeout before processing batch ${apiCallCount}`);
 							break;
 						}
 						// Add delay between requests to avoid rate limiting
@@ -166,7 +168,14 @@ export class LeverMCP extends McpAgent {
 
 						apiCallCount++; // Increment API call counter
 						const candidates = response.data || [];
-						totalScanned += candidates.length; // Track how many we've looked at
+						totalFetched += candidates.length; // Track what we fetched
+						console.log(`API call ${apiCallCount}: Fetched ${candidates.length} candidates, total fetched: ${totalFetched}`);
+						
+						// Check for timeout to prevent connection errors
+						if (Date.now() - startTime > maxExecutionTime) {
+							console.warn(`Advanced search timeout after ${Date.now() - startTime}ms`);
+							break;
+						}
 
 						// Filter candidates based on criteria
 						const filteredCandidates = candidates.filter((c) => {
@@ -271,8 +280,14 @@ export class LeverMCP extends McpAgent {
 							return companyMatch && skillMatch && locationMatch && tagMatch;
 						});
 
+						// NOW count the candidates we actually examined
+						totalProcessed += candidates.length; // We processed this entire batch
+						totalScanned = totalProcessed; // Update the scanned count to match processed
+
 						totalMatches += filteredCandidates.length;
 						allCandidates.push(...filteredCandidates);
+						
+						console.log(`Batch ${apiCallCount}: Processed ${candidates.length} candidates, found ${filteredCandidates.length} matches`);
 
 						if (!response.hasNext || !response.next) break;
 
@@ -308,6 +323,9 @@ export class LeverMCP extends McpAgent {
 						},
 						search_stats: {
 							candidates_scanned: totalScanned,
+							candidates_fetched: totalFetched,
+							candidates_processed: totalProcessed,
+							api_calls_made: apiCallCount,
 							candidates_matched: allCandidates.length,
 							match_rate: totalScanned > 0 ? Math.round((allCandidates.length / totalScanned) * 100) : 0,
 							execution_time_seconds: Math.round((Date.now() - startTime) / 1000),
