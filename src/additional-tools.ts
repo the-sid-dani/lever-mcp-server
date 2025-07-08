@@ -32,10 +32,8 @@ export function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
 			? opp.posting.text
 			: "Unknown";
 
-	const location =
-		typeof opp.location === "object" && opp.location
-			? opp.location.name
-			: String(opp.location || "Unknown");
+	// Location is a string in the API, not an object
+	const location = opp.location || "Unknown";
 
 	const createdDate = opp.createdAt
 		? new Date(opp.createdAt).toISOString().split("T")[0]
@@ -432,7 +430,8 @@ export function registerAdditionalTools(
 				}
 
 				const postingTitle = targetPosting.text || "";
-				const postingTeam = targetPosting.team?.text || "";
+				// Access team from categories object as per API docs
+				const postingTeam = targetPosting.categories?.team || "";
 
 				// Search for candidates who might be good referral sources
 				// Fetch all candidates with limit

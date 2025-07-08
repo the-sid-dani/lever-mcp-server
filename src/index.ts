@@ -39,10 +39,8 @@ function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
 			? opp.posting.text
 			: "Unknown";
 
-	const location =
-		typeof opp.location === "object" && opp.location
-			? opp.location.name
-			: String(opp.location || "Unknown");
+	// Location is a string in the API, not an object
+	const location = opp.location || "Unknown";
 
 	const createdDate = opp.createdAt
 		? new Date(opp.createdAt).toISOString().split("T")[0]
@@ -62,12 +60,16 @@ function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
 
 // Helper to format posting data
 function formatPosting(posting: LeverPosting): Record<string, any> {
+	// Access location and team from categories object as per API docs
+	const location = posting.categories?.location || "Unknown";
+	const team = posting.categories?.team || "Unknown";
+	
 	return {
 		id: posting.id || "",
 		title: posting.text || "Unknown",
 		state: posting.state || "Unknown",
-		location: posting.location?.name || "Unknown",
-		team: posting.team?.text || "Unknown",
+		location: location,
+		team: team,
 		url: posting.urls?.show || "",
 	};
 }
@@ -182,13 +184,8 @@ export class LeverMCP extends McpAgent {
 								typeof t === "string" ? t.toLowerCase() : "",
 							);
 
-							const cLocation = c.location || "";
-							let cLocationStr = "";
-							if (typeof cLocation === "object" && cLocation) {
-								cLocationStr = (cLocation.name || "").toLowerCase();
-							} else {
-								cLocationStr = String(cLocation).toLowerCase();
-							}
+							// Location is a string in the API, not an object
+							const cLocationStr = (c.location || "").toLowerCase();
 
 							// Get company info from headline field
 							const cHeadline = String(c.headline || "").toLowerCase();
@@ -528,10 +525,8 @@ export class LeverMCP extends McpAgent {
 					// Extract basic info
 					const name = opportunity.name || "Unknown";
 					const emails = opportunity.emails || [];
-					const location =
-						typeof opportunity.location === "object" && opportunity.location
-							? opportunity.location.name
-							: String(opportunity.location || "Unknown");
+					// Location is a string in the API, not an object
+					const location = opportunity.location || "Unknown";
 
 					// Format stage information
 					let stage_current = "Unknown";
@@ -675,6 +670,11 @@ export class LeverMCP extends McpAgent {
 		this.server.tool("lever_list_open_roles", {}, async () => {
 			try {
 				const response = await this.client.getPostings("published", 50);
+				
+				// Debug: Log the first posting to see the structure
+				if (response.data && response.data.length > 0) {
+					console.log("DEBUG: First posting raw data:", JSON.stringify(response.data[0]));
+				}
 
 				const results = {
 					count: response.data.length,
@@ -823,6 +823,66 @@ export class LeverMCP extends McpAgent {
 										error_message: error instanceof Error ? error.message : String(error),
 										error_type: error?.constructor?.name || "Unknown",
 										error_stack: error instanceof Error ? error.stack : undefined
+									}
+								}, null, 2),
+							},
+						],
+					};
+				}
+			},
+		);
+
+		// Debug postings - returns raw structure
+		this.server.tool(
+			"debug_postings",
+			{},
+			async () => {
+				try {
+					console.log(`DEBUG: Fetching raw postings data`);
+					
+					// Get postings to see raw structure
+					const response = await this.client.getPostings("published", 3);
+					
+					console.log(`DEBUG: Raw postings response:`, JSON.stringify(response).slice(0, 500));
+					
+					// Get detailed info about the first posting
+					const firstPosting = response.data?.[0];
+					
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									debug_info: {
+										total_postings: response.data?.length || 0,
+										has_next: response.hasNext,
+										first_posting_keys: firstPosting ? Object.keys(firstPosting) : [],
+										first_posting_raw: firstPosting,
+										location_type: firstPosting?.location ? typeof firstPosting.location : "undefined",
+										team_type: firstPosting?.team ? typeof firstPosting.team : "undefined",
+										sample_data: {
+											id: firstPosting?.id,
+											text: firstPosting?.text,
+											state: firstPosting?.state,
+											location_raw: firstPosting?.location,
+											team_raw: firstPosting?.team,
+											urls_raw: firstPosting?.urls
+										}
+									}
+								}, null, 2),
+							},
+						],
+					};
+				} catch (error) {
+					console.error(`DEBUG: Error fetching postings:`, error);
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									debug_error: {
+										error_message: error instanceof Error ? error.message : String(error),
+										error_type: error?.constructor?.name || "Unknown"
 									}
 								}, null, 2),
 							},

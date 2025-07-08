@@ -4,7 +4,7 @@ export interface LeverOpportunity {
 	name: string;
 	headline?: string;
 	emails?: string[];
-	location?: string | { name: string };
+	location?: string; // Changed from string | { name: string } to just string
 	stage?: string | { text: string; id?: string };
 	posting?: { text: string; id?: string };
 	tags?: string[];
@@ -27,8 +27,16 @@ export interface LeverPosting {
 	id: string;
 	text: string;
 	state: string;
-	location?: { name: string };
-	team?: { text: string };
+	categories?: {
+		team?: string;
+		department?: string;
+		location?: string;
+		allLocations?: string[];
+		commitment?: string;
+		level?: string;
+	};
+	location?: { name: string }; // Deprecated field, keeping for backward compatibility
+	team?: { text: string }; // Deprecated field, keeping for backward compatibility
 	urls?: { show?: string };
 }
 
