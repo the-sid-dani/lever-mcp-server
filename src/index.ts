@@ -112,7 +112,7 @@ export class LeverMCP extends McpAgent {
 				stage: z.string().optional(),
 				tags: z.string().optional(),
 				posting_id: z.string().optional(),
-				limit: z.number().default(200),
+				limit: z.number().default(50).describe("Results per page (recommended: 20-50 for broad searches)"),
 				page: z.number().default(1).describe("Page number (1-based)"),
 			},
 			async (args) => {
@@ -133,9 +133,11 @@ export class LeverMCP extends McpAgent {
 
 					const allCandidates: LeverOpportunity[] = [];
 					let offset: string | undefined;
-					// Reduce maxFetch to prevent timeouts - limit to 3x the requested limit or 500 max
-					const maxFetch = Math.min(args.limit * 3, 500); 
+					// Increase maxFetch to search more comprehensively - limit to 10x the requested limit or 1000 max
+					// This ensures we don't miss candidates while still having a reasonable limit
+					const maxFetch = Math.min(args.limit * 10, 1000); 
 					let totalMatches = 0; // Track total matches for pagination info
+					let totalScanned = 0; // Track how many candidates we've looked at
 					const startTime = Date.now();
 					const maxExecutionTime = 25000; // 25 seconds to stay under CF Worker limits
 
@@ -161,6 +163,7 @@ export class LeverMCP extends McpAgent {
 						});
 
 						const candidates = response.data || [];
+						totalScanned += candidates.length; // Track how many we've looked at
 
 						// Filter candidates based on criteria
 						const filteredCandidates = candidates.filter((c) => {
@@ -300,14 +303,21 @@ export class LeverMCP extends McpAgent {
 							tags: args.tags,
 							posting: args.posting_id,
 						},
+						search_stats: {
+							candidates_scanned: totalScanned,
+							candidates_matched: allCandidates.length,
+							match_rate: totalScanned > 0 ? Math.round((allCandidates.length / totalScanned) * 100) : 0,
+							execution_time_seconds: Math.round((Date.now() - startTime) / 1000),
+						},
 						candidates: paginatedCandidates.map(formatOpportunity),
 					};
 
 					// Add warning if search was incomplete
 					if (wasTimeout || allCandidates.length >= maxFetch) {
 						searchResult.warning = wasTimeout 
-							? `Search stopped after ${Math.round(executionTime / 1000)}s to prevent timeout. Results may be incomplete. Consider narrowing your search criteria.`
-							: `Search limited to ${maxFetch} candidates. More results may exist. Consider narrowing your search criteria.`;
+							? `Search stopped after scanning ${totalScanned} candidates (${Math.round(executionTime / 1000)}s). Found ${allCandidates.length} matches. More candidates may exist beyond this point.`
+							: `Reached maximum search depth after scanning ${totalScanned} candidates. Found ${allCandidates.length} matches. There may be more candidates beyond this search depth.`;
+						searchResult.recommendation = "To search deeper: 1) Use more specific criteria to narrow the search, 2) Try searching by specific companies or skills separately, or 3) Use email search if you have candidate emails.";
 					}
 
 					return {
