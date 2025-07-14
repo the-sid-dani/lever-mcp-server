@@ -175,7 +175,7 @@ export class LeverMCP extends McpAgent {
 							console.error(`Invalid API response structure for batch ${apiCallCount}:`, response);
 							break;
 						}
-						
+
 						const candidates = response.data || [];
 						totalFetched += candidates.length; // Track what we fetched
 						console.log(`API call ${apiCallCount}: Fetched ${candidates.length} candidates, total fetched: ${totalFetched}`);
@@ -337,20 +337,20 @@ export class LeverMCP extends McpAgent {
 					const executionTime = Date.now() - startTime;
 					const wasTimeout = executionTime > maxExecutionTime;
 					const searchResult: any = {
-						count: paginatedCandidates.length,
-						page: page,
-						total_matches: allCandidates.length,
-						total_pages: totalPages,
-						has_more: hasMore,
-						next_page: hasMore ? page + 1 : null,
-						search_criteria: {
-							companies: args.companies,
-							skills: args.skills,
-							locations: args.locations,
-							stage: args.stage,
-							tags: args.tags,
-							posting: args.posting_id,
-						},
+										count: paginatedCandidates.length,
+										page: page,
+										total_matches: allCandidates.length,
+										total_pages: totalPages,
+										has_more: hasMore,
+										next_page: hasMore ? page + 1 : null,
+										search_criteria: {
+											companies: args.companies,
+											skills: args.skills,
+											locations: args.locations,
+											stage: args.stage,
+											tags: args.tags,
+											posting: args.posting_id,
+										},
 						search_stats: {
 							candidates_scanned: totalScanned,
 							candidates_fetched: totalFetched,
@@ -360,7 +360,7 @@ export class LeverMCP extends McpAgent {
 							match_rate: totalScanned > 0 ? Math.round((allCandidates.length / totalScanned) * 100) : 0,
 							execution_time_seconds: Math.round((Date.now() - startTime) / 1000),
 						},
-						candidates: paginatedCandidates.map(formatOpportunity),
+										candidates: paginatedCandidates.map(formatOpportunity),
 					};
 
 					// Add warning if search was incomplete
@@ -705,29 +705,6 @@ export class LeverMCP extends McpAgent {
 						{
 							type: "text",
 							text: `Note added successfully to candidate ${args.opportunity_id}`,
-						},
-					],
-				};
-			},
-		);
-
-		// Archive candidate
-		this.server.tool(
-			"lever_archive_candidate",
-			{
-				opportunity_id: z.string(),
-				reason_id: z.string(),
-			},
-			async (args) => {
-				await this.client.archiveOpportunity(
-					args.opportunity_id,
-					args.reason_id,
-				);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Candidate ${args.opportunity_id} archived successfully`,
 						},
 					],
 				};

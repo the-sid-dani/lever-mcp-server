@@ -172,9 +172,9 @@ export class LeverClient {
 		try {
 			// The API returns { data: opportunity } structure, so we expect that format
 			const response = await this.makeRequest<{ data: LeverOpportunity }>(
-				"GET",
-				`/opportunities/${id}`,
-			);
+			"GET",
+			`/opportunities/${id}`,
+		);
 			
 			// Check if the API returned null or undefined
 			if (!response || !response.data) {
@@ -239,14 +239,25 @@ export class LeverClient {
 	async archiveOpportunity(
 		opportunityId: string,
 		reasonId: string,
+		performAs?: string,
+		cleanInterviews?: boolean,
+		requisitionId?: string,
 	): Promise<any> {
+		const data: any = { reason: reasonId };
+		if (performAs) {
+			data.perform_as = performAs;
+		}
+		if (cleanInterviews !== undefined) {
+			data.cleanInterviews = cleanInterviews;
+		}
+		if (requisitionId) {
+			data.requisitionId = requisitionId;
+		}
 		return this.makeRequest(
-			"POST",
+			"PUT", // Changed from POST to PUT to match API docs
 			`/opportunities/${opportunityId}/archived`,
 			undefined,
-			{
-				reason: reasonId,
-			},
+			data,
 		);
 	}
 
@@ -278,17 +289,60 @@ export class LeverClient {
 	async updateOpportunityStage(
 		opportunityId: string,
 		stageId: string,
-		reason?: string,
+		performAs?: string,
 	): Promise<any> {
 		const data: any = { stage: stageId };
-		if (reason) {
-			data.reason = reason;
+		if (performAs) {
+			data.perform_as = performAs;
 		}
 		return this.makeRequest(
-			"POST",
+			"PUT", // Changed from POST to PUT to match API docs
 			`/opportunities/${opportunityId}/stage`,
 			undefined,
 			data,
 		);
+	}
+
+	// New requisition methods
+	async getRequisitions(params?: {
+		status?: string;
+		requisition_code?: string;
+		created_at_start?: number;
+		created_at_end?: number;
+		confidentiality?: string;
+		limit?: number;
+		offset?: string;
+	}): Promise<any> {
+		return this.makeRequest("GET", "/requisitions", params);
+	}
+
+	async getRequisition(requisitionId: string): Promise<any> {
+		return this.makeRequest("GET", `/requisitions/${requisitionId}`);
+	}
+
+	async getRequisitionByCode(requisitionCode: string): Promise<any> {
+		// First try to find by code using the filter
+		const response = await this.getRequisitions({
+			requisition_code: requisitionCode,
+			limit: 1,
+		});
+		
+		if (response && response.data && response.data.length > 0) {
+			return { data: response.data[0] };
+		}
+		
+		throw new Error(`Requisition with code '${requisitionCode}' not found`);
+	}
+
+	async createRequisition(data: any): Promise<any> {
+		return this.makeRequest("POST", "/requisitions", undefined, data);
+	}
+
+	async updateRequisition(requisitionId: string, data: any): Promise<any> {
+		return this.makeRequest("PUT", `/requisitions/${requisitionId}`, undefined, data);
+	}
+
+	async deleteRequisition(requisitionId: string): Promise<any> {
+		return this.makeRequest("DELETE", `/requisitions/${requisitionId}`);
 	}
 }

@@ -738,4 +738,385 @@ export function registerAdditionalTools(
 			}
 		},
 	);
+
+	// NEW TOOLS: Following the implementation plan
+
+	// Tool 1: Move candidate to stage
+	server.tool(
+		"lever_move_candidate_to_stage",
+		{
+			opportunity_id: z.string().describe("The candidate's opportunity ID"),
+			stage_id: z.string().describe("The target stage ID (use lever_get_stages to find valid IDs)"),
+			perform_as: z.string().optional().describe("Optional: User ID to perform this action on behalf of"),
+		},
+		async (args) => {
+			try {
+				// Get candidate info first for context
+				const oppResponse = await client.getOpportunity(args.opportunity_id);
+				const opportunity = oppResponse.data;
+
+				// Get current stage for comparison
+				const currentStage = opportunity.stage;
+
+				// Update the stage
+				const updateResponse = await client.updateOpportunityStage(
+					args.opportunity_id,
+					args.stage_id,
+					args.perform_as,
+				);
+
+				// Get updated candidate info
+				const updatedOppResponse = await client.getOpportunity(args.opportunity_id);
+				const updatedOpportunity = updatedOppResponse.data;
+
+				const result = {
+					success: true,
+					candidate: opportunity.name || "Unknown",
+					stage_change: {
+						from: typeof currentStage === "object" ? currentStage.text : String(currentStage || "Unknown"),
+						to: typeof updatedOpportunity.stage === "object" ? updatedOpportunity.stage.text : String(updatedOpportunity.stage || "Unknown"),
+						stage_id: args.stage_id,
+					},
+					performed_by: args.perform_as || "API User",
+					timestamp: new Date().toISOString(),
+				};
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(result, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+								note: "Make sure the stage_id is valid. Use lever_get_stages to see available stages.",
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
+
+	// Tool 2: List requisitions
+	server.tool(
+		"lever_list_requisitions",
+		{
+			status: z.enum(["open", "closed", "onHold", "draft"]).optional().describe("Filter by requisition status"),
+			requisition_code: z.string().optional().describe("Filter by external HRIS requisition code (e.g., 'ENG-145')"),
+			created_at_start: z.number().optional().describe("Filter by creation date (timestamp in milliseconds)"),
+			created_at_end: z.number().optional().describe("Filter by creation date (timestamp in milliseconds)"),
+			confidentiality: z.enum(["confidential", "non-confidential", "all"]).default("non-confidential").describe("Filter by confidentiality level"),
+			limit: z.number().default(25).describe("Number of results to return (max 100)"),
+			offset: z.string().optional().describe("Pagination offset token"),
+		},
+		async (args) => {
+			try {
+				// Prepare parameters for API call
+				const params: any = {
+					limit: Math.min(args.limit, 100),
+					confidentiality: args.confidentiality,
+				};
+
+				if (args.status) params.status = args.status;
+				if (args.requisition_code) params.requisition_code = args.requisition_code;
+				if (args.created_at_start) params.created_at_start = args.created_at_start;
+				if (args.created_at_end) params.created_at_end = args.created_at_end;
+				if (args.offset) params.offset = args.offset;
+
+				// Get requisitions from API
+				const response = await client.getRequisitions(params);
+				const requisitions = response.data || [];
+
+				// Format the results to clearly show ID vs Code distinction
+				const formattedResults = requisitions.map((req: any) => ({
+					// CRITICAL: Show both ID and Code clearly
+					lever_id: req.id || "",
+					requisition_code: req.requisitionCode || "",
+					name: req.name || "",
+					status: req.status || "",
+					headcount: {
+						total: req.headcountTotal || 0,
+						hired: req.headcountHired || 0,
+						remaining: (req.headcountTotal || 0) - (req.headcountHired || 0),
+					},
+					details: {
+						employment_status: req.employmentStatus || "",
+						location: req.location || "",
+						team: req.team || "",
+						department: req.department || "",
+						confidentiality: req.confidentiality || "",
+					},
+					compensation: req.compensationBand ? {
+						currency: req.compensationBand.currency || "",
+						min: req.compensationBand.min || 0,
+						max: req.compensationBand.max || 0,
+						interval: req.compensationBand.interval || "",
+					} : null,
+					owner: req.owner || "",
+					hiring_manager: req.hiringManager || "",
+					created_at: req.createdAt ? new Date(req.createdAt).toISOString().split("T")[0] : "",
+					updated_at: req.updatedAt ? new Date(req.updatedAt).toISOString().split("T")[0] : "",
+				}));
+
+				const result = {
+					count: formattedResults.length,
+					filters_applied: {
+						status: args.status || "all",
+						requisition_code: args.requisition_code || "none",
+						confidentiality: args.confidentiality,
+					},
+					note: "Use lever_id for API calls, requisition_code for HRIS integration",
+					requisitions: formattedResults,
+				};
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(result, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
+
+	// Tool 3: Get requisition details with smart lookup
+	server.tool(
+		"lever_get_requisition_details",
+		{
+			requisition_identifier: z.string().describe("Either the Lever ID (UUID) or the external requisition code (e.g., 'ENG-145')"),
+		},
+		async (args) => {
+			try {
+				let requisition: any;
+				let lookupMethod: string;
+
+				// Smart lookup logic: determine if input is ID or code
+				const identifier = args.requisition_identifier.trim();
+				
+				// Check if it looks like a UUID (contains hyphens and is 36 chars)
+				const isUUID = identifier.length === 36 && identifier.includes("-");
+
+				if (isUUID) {
+					// Try direct ID lookup first
+					try {
+						const response = await client.getRequisition(identifier);
+						requisition = response.data;
+						lookupMethod = "direct_id_lookup";
+					} catch (error) {
+						// If direct ID lookup fails, try as code
+						try {
+							const response = await client.getRequisitionByCode(identifier);
+							requisition = response.data;
+							lookupMethod = "code_lookup_fallback";
+						} catch (codeError) {
+							throw new Error(`Requisition not found using ID '${identifier}': ${error instanceof Error ? error.message : String(error)}`);
+						}
+					}
+				} else {
+					// Looks like a code, try code lookup first
+					try {
+						const response = await client.getRequisitionByCode(identifier);
+						requisition = response.data;
+						lookupMethod = "code_lookup";
+					} catch (error) {
+						// If code lookup fails, try as direct ID
+						try {
+							const response = await client.getRequisition(identifier);
+							requisition = response.data;
+							lookupMethod = "id_lookup_fallback";
+						} catch (idError) {
+							throw new Error(`Requisition not found using code '${identifier}': ${error instanceof Error ? error.message : String(error)}`);
+						}
+					}
+				}
+
+				// Format the detailed response
+				const result = {
+					lookup_method: lookupMethod,
+					requisition_details: {
+						// Core identifiers
+						lever_id: requisition.id || "",
+						requisition_code: requisition.requisitionCode || "",
+						name: requisition.name || "",
+						
+						// Status and headcount
+						status: requisition.status || "",
+						headcount: {
+							total: requisition.headcountTotal || 0,
+							hired: requisition.headcountHired || 0,
+							remaining: (requisition.headcountTotal || 0) - (requisition.headcountHired || 0),
+						},
+						backfill: requisition.backfill || false,
+						
+						// Details
+						employment_status: requisition.employmentStatus || "",
+						location: requisition.location || "",
+						team: requisition.team || "",
+						department: requisition.department || "",
+						confidentiality: requisition.confidentiality || "",
+						
+						// Compensation
+						compensation_band: requisition.compensationBand ? {
+							currency: requisition.compensationBand.currency || "",
+							min: requisition.compensationBand.min || 0,
+							max: requisition.compensationBand.max || 0,
+							interval: requisition.compensationBand.interval || "",
+						} : null,
+						
+						// People
+						owner: requisition.owner || "",
+						hiring_manager: requisition.hiringManager || "",
+						creator: requisition.creator || "",
+						
+						// Associated postings
+						postings: requisition.postings || [],
+						
+						// Approval
+						approval: requisition.approval || null,
+						
+						// Custom fields
+						custom_fields: requisition.customFields || {},
+						
+						// Internal notes
+						internal_notes: requisition.internalNotes || "",
+						
+						// Timestamps
+						created_at: requisition.createdAt ? new Date(requisition.createdAt).toISOString() : "",
+						updated_at: requisition.updatedAt ? new Date(requisition.updatedAt).toISOString() : "",
+						closed_at: requisition.closedAt ? new Date(requisition.closedAt).toISOString() : "",
+					},
+				};
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(result, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+								note: "You can use either the Lever ID (UUID) or the external requisition code (e.g., 'ENG-145')",
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
+
+	// Tool 4: Archive candidate with enhanced parameters
+	server.tool(
+		"lever_archive_candidate",
+		{
+			opportunity_id: z.string().describe("The candidate's opportunity ID"),
+			archive_reason_id: z.string().describe("Archive reason ID (use lever_get_archive_reasons to find valid IDs)"),
+			perform_as: z.string().optional().describe("Optional: User ID to perform this action on behalf of"),
+			clean_interviews: z.boolean().default(false).describe("Whether to remove pending interviews when archiving"),
+			requisition_id: z.string().optional().describe("Optional: Requisition ID if hiring against a specific requisition"),
+		},
+		async (args) => {
+			try {
+				// Get candidate info first for context
+				const oppResponse = await client.getOpportunity(args.opportunity_id);
+				const opportunity = oppResponse.data;
+
+				// Get archive reasons for validation and context
+				const archiveReasonsResponse = await client.getArchiveReasons();
+				const archiveReasons = archiveReasonsResponse.data || [];
+				
+				// Find the reason details
+				const selectedReason = archiveReasons.find((reason: any) => reason.id === args.archive_reason_id);
+				
+				if (!selectedReason) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									error: `Invalid archive reason ID: ${args.archive_reason_id}`,
+									available_reasons: archiveReasons.map((reason: any) => ({
+										id: reason.id,
+										text: reason.text,
+									})),
+									note: "Use lever_get_archive_reasons to see all valid archive reason IDs",
+								}),
+							},
+						],
+					};
+				}
+
+				// Archive the candidate
+				const archiveResponse = await client.archiveOpportunity(
+					args.opportunity_id,
+					args.archive_reason_id,
+					args.perform_as,
+					args.clean_interviews,
+					args.requisition_id,
+				);
+
+				const result = {
+					success: true,
+					candidate: opportunity.name || "Unknown",
+					archive_details: {
+						reason: selectedReason.text || "Unknown",
+						reason_id: args.archive_reason_id,
+						clean_interviews: args.clean_interviews,
+						requisition_id: args.requisition_id || null,
+					},
+					performed_by: args.perform_as || "API User",
+					timestamp: new Date().toISOString(),
+					note: "Candidate has been archived and removed from active pipeline",
+				};
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(result, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+								note: "Make sure the archive_reason_id is valid. Use lever_get_archive_reasons to see available reasons.",
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
 }

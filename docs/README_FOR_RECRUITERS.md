@@ -11,7 +11,15 @@ Welcome! Here's all the documentation to help you use the Lever search tool effe
 - Common mistakes to avoid
 - Quick troubleshooting
 
-### 2. **[RECRUITING_TEAM_BEST_PRACTICES.md](./RECRUITING_TEAM_BEST_PRACTICES.md)** 📋
+### 2. **[LEVER_TOOLS_FOR_RECRUITERS.md](./LEVER_TOOLS_FOR_RECRUITERS.md)** 📖
+Complete guide to all 16 Lever tools with practical examples.
+- What each tool does in recruiting terms
+- When to use each tool
+- Practical examples for every tool
+- Common recruiting workflows
+- Essential reference for all recruiters
+
+### 3. **[RECRUITING_TEAM_BEST_PRACTICES.md](./RECRUITING_TEAM_BEST_PRACTICES.md)** 📋
 Comprehensive guide with detailed best practices.
 - Essential tips for effective searches
 - Search strategies by type
@@ -19,14 +27,14 @@ Comprehensive guide with detailed best practices.
 - Advanced techniques
 - Detailed troubleshooting
 
-### 3. **[LEVER_TOOL_CHEAT_SHEET.md](./LEVER_TOOL_CHEAT_SHEET.md)** 🎯
+### 4. **[LEVER_TOOL_CHEAT_SHEET.md](./LEVER_TOOL_CHEAT_SHEET.md)** 🎯
 Quick reference card (perfect for printing!)
 - Good vs bad search examples
 - Error solutions at a glance
 - Pro tips in bullet points
 - Search formula template
 
-### 4. **[LEVER_DATA_FIELDS_GUIDE.md](./LEVER_DATA_FIELDS_GUIDE.md)** 📊
+### 5. **[LEVER_DATA_FIELDS_GUIDE.md](./LEVER_DATA_FIELDS_GUIDE.md)** 📊
 Understanding what the search results mean.
 - What each field represents
 - Candidate stages explained
@@ -36,9 +44,10 @@ Understanding what the search results mean.
 ## 🚀 Recommended Reading Order
 
 1. **First Time?** → Start with Quick Start
-2. **Want Details?** → Read Best Practices
-3. **Daily Use?** → Keep Cheat Sheet handy
-4. **Confused by Results?** → Check Data Fields Guide
+2. **Need Tool Reference?** → Use the Complete Tools Guide
+3. **Want Advanced Tips?** → Read Best Practices
+4. **Daily Use?** → Keep Cheat Sheet handy
+5. **Confused by Results?** → Check Data Fields Guide
 
 ## 💡 Key Takeaways
 
