@@ -72,7 +72,12 @@ export class LeverClient {
 			if (params) {
 				Object.entries(params).forEach(([key, value]) => {
 					if (value !== undefined && value !== null) {
-						url.searchParams.append(key, String(value));
+						// Handle arrays by appending multiple times
+						if (Array.isArray(value)) {
+							value.forEach(v => url.searchParams.append(key, String(v)));
+						} else {
+							url.searchParams.append(key, String(value));
+						}
 					}
 				});
 			}
@@ -233,15 +238,15 @@ export class LeverClient {
 		}
 		
 		// Support for expanding user objects (owner, hiringManager, etc.)
-		// Lever API expects a comma-separated string for expand parameter
+		// Pass array directly - makeRequest will handle multiple values
 		if (expand && expand.length > 0) {
-			params.expand = expand.join(',');
+			params.expand = expand;
 		}
 		
 		// Support for including optional fields
-		// Lever API expects a comma-separated string for include parameter
+		// Pass array directly - makeRequest will handle multiple values
 		if (include && include.length > 0) {
-			params.include = include.join(',');
+			params.include = include;
 		}
 		
 		return this.makeRequest<LeverApiResponse<LeverPosting>>(
