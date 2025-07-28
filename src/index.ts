@@ -64,13 +64,55 @@ function formatPosting(posting: LeverPosting): Record<string, any> {
 	const location = posting.categories?.location || "Unknown";
 	const team = posting.categories?.team || "Unknown";
 	
+	// Format owner information
+	let ownerName = "Unassigned";
+	let ownerId = "";
+	if (typeof posting.owner === "object" && posting.owner) {
+		ownerName = posting.owner.name || "Unknown";
+		ownerId = posting.owner.id || "";
+	} else if (typeof posting.owner === "string") {
+		ownerId = posting.owner;
+		ownerName = `User ID: ${posting.owner}`;
+	}
+	
+	// Format hiring manager
+	let hiringManagerName = "Unassigned";
+	let hiringManagerId = "";
+	if (typeof posting.hiringManager === "object" && posting.hiringManager) {
+		hiringManagerName = posting.hiringManager.name || "Unknown";
+		hiringManagerId = posting.hiringManager.id || "";
+	} else if (typeof posting.hiringManager === "string") {
+		hiringManagerId = posting.hiringManager;
+		hiringManagerName = `User ID: ${posting.hiringManager}`;
+	}
+	
+	// Format created date
+	const createdDate = posting.createdAt
+		? new Date(posting.createdAt).toISOString().split("T")[0]
+		: "Unknown";
+	
 	return {
 		id: posting.id || "",
 		title: posting.text || "Unknown",
 		state: posting.state || "Unknown",
 		location: location,
 		team: team,
+		// Add owner and people information
+		posting_owner: {
+			id: ownerId,
+			name: ownerName,
+		},
+		hiring_manager: {
+			id: hiringManagerId,
+			name: hiringManagerName,
+		},
+		// Add additional useful fields
+		workplace_type: posting.workplaceType || "unspecified",
+		commitment: posting.categories?.commitment || "Unknown",
+		department: posting.categories?.department || "Unknown",
+		created_date: createdDate,
 		url: posting.urls?.show || "",
+		apply_url: posting.urls?.apply || "",
 	};
 }
 
@@ -714,9 +756,13 @@ export class LeverMCP extends McpAgent {
 
 	private registerUtilityTools() {
 		// List open roles
-		this.server.tool("lever_list_open_roles", {}, async () => {
+		this.server.tool("lever_list_open_roles", {
+			expand_owners: z.boolean().default(true).describe("Include posting owner and hiring manager details"),
+		}, async (args) => {
 			try {
-				const response = await this.client.getPostings("published", 50);
+				// Get postings with owner data if requested
+				const expandFields = args.expand_owners ? ["owner", "hiringManager"] : [];
+				const response = await this.client.getPostings("published", 50, undefined, expandFields);
 				
 				// Debug: Log the first posting to see the structure
 				if (response.data && response.data.length > 0) {
@@ -726,6 +772,7 @@ export class LeverMCP extends McpAgent {
 				const results = {
 					count: response.data.length,
 					hasMore: response.hasNext || false,
+					includes_owner_data: args.expand_owners,
 					roles: response.data.map(formatPosting),
 				};
 
@@ -776,6 +823,46 @@ export class LeverMCP extends McpAgent {
 				],
 			};
 		});
+
+		// Find postings by owner/recruiter name
+		this.server.tool(
+			"lever_find_postings_by_owner",
+			{
+				owner_name: z.string().describe("Name of the posting owner/recruiter (partial match supported)"),
+				state: z.enum(["published", "closed", "draft", "pending", "rejected"]).default("published"),
+				limit: z.number().default(50),
+			},
+			async (args) => {
+				try {
+					const response = await this.client.getPostingsByOwner(args.owner_name, args.state);
+					
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									count: response.data.length,
+									owner_searched: args.owner_name,
+									state_filter: args.state,
+									postings: response.data.map(formatPosting),
+								}, null, 2),
+							},
+						],
+					};
+				} catch (error) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									error: error instanceof Error ? error.message : String(error),
+								}),
+							},
+						],
+					};
+				}
+			},
+		);
 
 		// Test connection tool
 		this.server.tool("test_lever_connection", {}, async () => {

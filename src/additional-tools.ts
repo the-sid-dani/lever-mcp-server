@@ -51,6 +51,37 @@ export function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
 	};
 }
 
+// Helper to format posting data 
+function formatPosting(posting: any): Record<string, any> {
+	// Access location and team from categories object as per API docs
+	const location = posting.categories?.location || "Unknown";
+	const team = posting.categories?.team || "Unknown";
+	
+	// Format owner information
+	let ownerName = "Unassigned";
+	let ownerId = "";
+	if (typeof posting.owner === "object" && posting.owner) {
+		ownerName = posting.owner.name || "Unknown";
+		ownerId = posting.owner.id || "";
+	} else if (typeof posting.owner === "string") {
+		ownerId = posting.owner;
+		ownerName = `User ID: ${posting.owner}`;
+	}
+	
+	return {
+		id: posting.id || "",
+		title: posting.text || "Unknown",
+		state: posting.state || "Unknown",
+		location: location,
+		team: team,
+		posting_owner: {
+			id: ownerId,
+			name: ownerName,
+		},
+		url: posting.urls?.show || "",
+	};
+}
+
 export function registerAdditionalTools(
 	server: McpServer,
 	client: LeverClient,
@@ -1113,6 +1144,337 @@ export function registerAdditionalTools(
 								error: error instanceof Error ? error.message : String(error),
 								note: "Make sure the archive_reason_id is valid. Use lever_get_archive_reasons to see available reasons.",
 							}),
+						},
+					],
+				};
+			}
+		},
+	);
+
+	// MASTER TOOL: Comprehensive Recruiter Dashboard
+	server.tool(
+		"lever_recruiter_dashboard",
+		{
+			owner_name: z.string().describe("Name of the posting owner/recruiter (e.g., 'ciarli bolden')"),
+			include_interviews: z.boolean().default(true).describe("Include upcoming interview data"),
+			days_ahead: z.number().default(7).describe("How many days ahead to look for interviews"),
+			stage_filter: z.string().optional().describe("Optional: Filter candidates by specific stage"),
+		},
+		async (args) => {
+			try {
+				// Get all postings for this owner
+				const postingsResponse = await client.getPostingsByOwner(args.owner_name);
+				
+				if (postingsResponse.data.length === 0) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									recruiter: args.owner_name,
+									message: "No postings found for this recruiter",
+									suggestion: "Check the spelling of the recruiter name or try a partial match",
+								}, null, 2),
+							},
+						],
+					};
+				}
+
+				// Get candidates for each posting
+				const results = [];
+				let totalCandidates = 0;
+				let candidatesWithInterviews = 0;
+
+				for (const posting of postingsResponse.data) {
+					const candidatesResponse = await client.getOpportunities({
+						posting_id: posting.id,
+						stage_id: args.stage_filter,
+						limit: 100,
+					});
+
+					totalCandidates += candidatesResponse.data.length;
+
+					const postingData = {
+						...formatPosting(posting),
+						candidate_count: candidatesResponse.data.length,
+						candidates: candidatesResponse.data.map(formatOpportunity),
+						candidates_with_upcoming_interviews: [] as any[],
+					};
+
+					// If interviews requested, get interview data
+					if (args.include_interviews) {
+						for (const candidate of candidatesResponse.data) {
+							try {
+								const interviews = await client.getOpportunityInterviews(candidate.id);
+								const upcomingInterviews = interviews.data?.filter((interview: any) => {
+									if (!interview.date) return false;
+									const interviewDate = new Date(interview.date);
+									const now = new Date();
+									const cutoff = new Date(now.getTime() + (args.days_ahead * 24 * 60 * 60 * 1000));
+									return interviewDate >= now && interviewDate <= cutoff;
+								}) || [];
+
+								if (upcomingInterviews.length > 0) {
+									candidatesWithInterviews++;
+									postingData.candidates_with_upcoming_interviews.push({
+										...formatOpportunity(candidate),
+										upcoming_interviews: upcomingInterviews.map((interview: any) => ({
+											id: interview.id,
+											subject: interview.subject || "Interview",
+											date: interview.date ? new Date(interview.date).toISOString() : "Unknown",
+											interviewers: interview.interviewers?.map((i: any) => i.name || i.email || "Unknown") || [],
+											location: interview.location || "Not specified",
+											duration: interview.duration || "Unknown",
+										})),
+									});
+								}
+							} catch (error) {
+								// Continue if interview data not available for this candidate
+								console.log(`Could not fetch interviews for candidate ${candidate.id}:`, error);
+							}
+						}
+					}
+
+					results.push(postingData);
+				}
+
+				const summary = {
+					recruiter: args.owner_name,
+					total_postings: results.length,
+					total_candidates: totalCandidates,
+					candidates_with_upcoming_interviews: candidatesWithInterviews,
+					includes_interviews: args.include_interviews,
+					days_ahead: args.days_ahead,
+					stage_filter: args.stage_filter || "all_stages",
+					postings: results,
+				};
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(summary, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+								recruiter: args.owner_name,
+								note: "Make sure the recruiter name is spelled correctly. Try using partial names like 'ciarli' instead of full names.",
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
+
+	// Tool 11: List all files for a candidate
+	server.tool(
+		"lever_list_files",
+		{
+			opportunity_id: z.string().describe("The candidate's opportunity ID"),
+		},
+		async (args) => {
+			try {
+				const files = await client.getFiles(args.opportunity_id);
+
+				// Format file information
+				const fileList = files.map((file: any) => ({
+					name: file.name || "Unnamed file",
+					downloadUrl: file.downloadUrl || "Not available",
+					ext: file.ext || "Unknown",
+					uploadedAt: file.uploadedAt
+						? new Date(file.uploadedAt).toISOString()
+						: "Unknown",
+				}));
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Files for candidate ${args.opportunity_id}:\n\n${JSON.stringify(
+								{
+									count: fileList.length,
+									files: fileList,
+								},
+								null,
+								2,
+							)}`,
+						},
+					],
+				};
+			} catch (error: any) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error listing files: ${error.message}`,
+						},
+					],
+				};
+			}
+		},
+	);
+
+	// Tool 12: Search archived candidates with interview data
+	server.tool(
+		"lever_search_archived_candidates",
+		{
+			posting_id: z.string().optional().describe("Specific posting ID to search within"),
+			archived_at_start: z.string().optional().describe("Start date for archive filter (YYYY-MM-DD)"),
+			archived_at_end: z.string().optional().describe("End date for archive filter (YYYY-MM-DD)"),
+			archive_reason_id: z.string().optional().describe("Specific archive reason ID to filter by"),
+			include_interviews: z.boolean().default(true).describe("Include interview count and details"),
+			recruiter_name: z.string().optional().describe("Filter by recruiter/owner name"),
+			limit: z.number().default(100).describe("Maximum number of archived candidates to return per page"),
+			offset: z.string().optional().describe("Pagination offset token"),
+			fetch_all_pages: z.boolean().default(false).describe("Whether to fetch all pages of results (ignores limit)"),
+		},
+		async (args) => {
+			try {
+				let allCandidates: any[] = [];
+				let offset = args.offset;
+				let hasNext = true;
+				let totalFetched = 0;
+				let pageCount = 0;
+				const maxPages = args.fetch_all_pages ? 50 : 1; // Safety limit
+
+				// Fetch candidates with pagination
+				while (hasNext && pageCount < maxPages) {
+					const response = await client.getArchivedCandidates({
+						posting_id: args.posting_id,
+						archived_at_start: args.archived_at_start,
+						archived_at_end: args.archived_at_end,
+						archive_reason_id: args.archive_reason_id,
+						limit: args.limit,
+						offset: offset,
+					});
+
+					allCandidates.push(...response.data);
+					totalFetched += response.data.length;
+					pageCount++;
+
+					// Check if we should continue fetching
+					if (!args.fetch_all_pages) {
+						// Single page mode - include pagination info in response
+						hasNext = false;
+					} else {
+						// Multi-page mode - continue if there are more results
+						if (!response.hasNext || !response.next) break;
+						offset = response.next;
+					}
+
+					// For single page, preserve pagination info for next call
+					if (!args.fetch_all_pages) {
+						hasNext = response.hasNext || false;
+						break;
+					}
+				}
+
+				// Filter by recruiter name if provided
+				let filteredCandidates = allCandidates;
+				if (args.recruiter_name) {
+					const recruiterLower = args.recruiter_name.toLowerCase();
+					filteredCandidates = allCandidates.filter((candidate: any) => {
+						// Check posting owner
+						if (candidate.posting && typeof candidate.posting === 'object') {
+							const posting = candidate.posting;
+							if (typeof posting.owner === 'object' && posting.owner?.name) {
+								return posting.owner.name.toLowerCase().includes(recruiterLower);
+							}
+						}
+						
+						// Check candidate owner
+						if (typeof candidate.owner === 'object' && candidate.owner?.name) {
+							return candidate.owner.name.toLowerCase().includes(recruiterLower);
+						}
+						
+						return false;
+					});
+				}
+
+				// Process candidates with interview data if requested
+				const processedCandidates = await Promise.all(
+					filteredCandidates.map(async (candidate: any) => {
+						const candidateData = formatOpportunity(candidate);
+						
+						if (args.include_interviews) {
+							try {
+								// Get interview data for this candidate
+								const interviews = await client.getOpportunityInterviews(candidate.id);
+								candidateData.interview_count = interviews.length;
+								candidateData.interviews = interviews.map((interview: any) => ({
+									id: interview.id,
+									subject: interview.subject || "Interview",
+									date: interview.date ? new Date(interview.date).toISOString() : "Unknown",
+									interviewers: interview.interviewers?.map((i: any) => i.name || i.email || "Unknown") || [],
+									feedback_submitted: !!interview.feedbacks?.length,
+								}));
+							} catch (error) {
+								// If we can't get interviews, just note it
+								candidateData.interview_count = "Unable to fetch";
+								candidateData.interviews = [];
+							}
+						}
+
+						return candidateData;
+					})
+				);
+
+				// Generate summary statistics
+				const totalInterviews = processedCandidates.reduce((sum: number, candidate: any) => {
+					return sum + (typeof candidate.interview_count === 'number' ? candidate.interview_count : 0);
+				}, 0);
+
+				const summary = {
+					total_archived_candidates: processedCandidates.length,
+					total_interviews_conducted: args.include_interviews ? totalInterviews : "Not calculated",
+					pages_fetched: pageCount,
+					search_criteria: {
+						posting_id: args.posting_id || "All postings",
+						date_range: args.archived_at_start && args.archived_at_end 
+							? `${args.archived_at_start} to ${args.archived_at_end}`
+							: "All time",
+						recruiter: args.recruiter_name || "All recruiters",
+						archive_reason: args.archive_reason_id || "All reasons",
+						fetch_mode: args.fetch_all_pages ? "All pages" : "Single page",
+					},
+				};
+
+				// Include pagination info for single page mode
+				const result: any = {
+					summary,
+					candidates: processedCandidates,
+				};
+
+				if (!args.fetch_all_pages) {
+					result.pagination = {
+						has_next: hasNext,
+						next_offset: offset,
+						current_page_size: allCandidates.length,
+					};
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(result, null, 2),
+						},
+					],
+				};
+			} catch (error: any) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error searching archived candidates: ${error.message}`,
 						},
 					],
 				};

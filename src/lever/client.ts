@@ -213,6 +213,8 @@ export class LeverClient {
 		state: string = "published",
 		limit: number = 25,
 		offset?: string,
+		expand?: string[], // Add support for expanding fields like owner, hiringManager
+		include?: string[], // Add support for including optional fields
 	): Promise<LeverApiResponse<LeverPosting>> {
 		const params: any = {
 			state,
@@ -221,6 +223,22 @@ export class LeverClient {
 		if (offset) {
 			params.offset = offset;
 		}
+		
+		// Support for expanding user objects (owner, hiringManager, etc.)
+		if (expand && expand.length > 0) {
+			expand.forEach(field => {
+				// Lever API accepts multiple expand parameters
+				params[`expand`] = field;
+			});
+		}
+		
+		// Support for including optional fields
+		if (include && include.length > 0) {
+			include.forEach(field => {
+				params[`include`] = field;
+			});
+		}
+		
 		return this.makeRequest<LeverApiResponse<LeverPosting>>(
 			"GET",
 			"/postings",
@@ -344,5 +362,84 @@ export class LeverClient {
 
 	async deleteRequisition(requisitionId: string): Promise<any> {
 		return this.makeRequest("DELETE", `/requisitions/${requisitionId}`);
+	}
+
+	// Add method to get interviews for a candidate
+	async getOpportunityInterviews(opportunityId: string): Promise<any> {
+		return this.makeRequest("GET", `/opportunities/${opportunityId}/interviews`);
+	}
+
+	// Add method to find postings by owner name
+	async getPostingsByOwner(ownerName: string, state: string = "published"): Promise<LeverApiResponse<LeverPosting>> {
+		// Get all postings with owner data expanded
+		const response = await this.getPostings(state, 100, undefined, ["owner"]);
+		
+		// Filter by owner name (case-insensitive partial match)
+		const filteredPostings = response.data.filter(posting => {
+			if (typeof posting.owner === "object" && posting.owner?.name) {
+				return posting.owner.name.toLowerCase().includes(ownerName.toLowerCase());
+			}
+			return false;
+		});
+		
+		return {
+			data: filteredPostings,
+			hasNext: false,
+			next: undefined,
+		};
+	}
+
+	// Add method to search archived candidates specifically
+	async getArchivedCandidates(params: {
+		posting_id?: string;
+		archived_at_start?: string;
+		archived_at_end?: string;
+		archive_reason_id?: string;
+		limit?: number;
+		offset?: string; // Add pagination support
+	}): Promise<LeverApiResponse<LeverOpportunity>> {
+		const queryParams: any = {
+			archived: true,  // Key parameter to get archived candidates
+			limit: Math.min(params.limit || 100, 100),
+		};
+
+		// Add pagination offset if provided
+		if (params.offset) {
+			queryParams.offset = params.offset;
+		}
+
+		// Add date filters if provided
+		if (params.archived_at_start) {
+			queryParams.archived_at_start = params.archived_at_start;
+		}
+		if (params.archived_at_end) {
+			queryParams.archived_at_end = params.archived_at_end;
+		}
+
+		// Filter by posting if provided
+		if (params.posting_id) {
+			queryParams.posting_id = params.posting_id;
+		}
+
+		// Filter by archive reason if provided
+		if (params.archive_reason_id) {
+			queryParams.archive_reason_id = params.archive_reason_id;
+		}
+
+		// Expand user objects for better data
+		queryParams.expand = ["owner", "posting"];
+
+		return this.makeRequest("GET", "/opportunities", queryParams);
+	}
+
+	// Add method to get files for a candidate
+	async getFiles(opportunityId: string): Promise<any[]> {
+		try {
+			const response = await this.makeRequest("GET", `/opportunities/${opportunityId}/files`);
+			return response.data || [];
+		} catch (error) {
+			console.warn(`Failed to get files for opportunity ${opportunityId}:`, error);
+			return [];
+		}
 	}
 }
