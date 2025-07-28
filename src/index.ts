@@ -1,4 +1,3 @@
-import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LeverClient } from "./lever/client";
@@ -8,6 +7,7 @@ import { registerAdditionalTools } from "./additional-tools";
 // Environment interface
 interface Env {
 	LEVER_API_KEY: string;
+	LEVER_MCP: DurableObjectNamespace;
 }
 
 // Helper to format opportunity data
@@ -116,16 +116,44 @@ function formatPosting(posting: LeverPosting): Record<string, any> {
 	};
 }
 
-// Define our Lever MCP agent
-export class LeverMCP extends McpAgent {
-	server = new McpServer({
-		name: "Lever ATS",
-		version: "1.0.0",
-	});
-
+// Define our Lever MCP server
+export class LeverMCP {
+	private server: McpServer;
 	private client!: LeverClient;
+	private toolsRegistered = false; // Guard against double registration
+	private state: DurableObjectState;
+	private env: Env;
+
+	constructor(state: DurableObjectState, env: Env) {
+		this.state = state;
+		this.env = env;
+		
+		// Initialize MCP server
+		this.server = new McpServer({
+			name: "Lever ATS",
+			version: "1.0.0",
+		}, {
+			capabilities: {
+				tools: {}
+			}
+		});
+		
+		// Initialize on construction
+		this.state.blockConcurrencyWhile(async () => {
+			await this.init();
+		});
+	}
 
 	async init() {
+		console.log("=== INIT CALLED ===", new Date().toISOString());
+		console.log("Init call stack:", new Error().stack?.split('\n').slice(1, 5).join('\n'));
+		
+		// Check if tools are already registered
+		if (this.toolsRegistered) {
+			console.warn("⚠️ TOOLS ALREADY REGISTERED - SKIPPING REGISTRATION TO PREVENT GHOSTS");
+			return;
+		}
+		
 		// Initialize Lever client with API key from environment
 		const env = this.env as Env;
 		const apiKey = env.LEVER_API_KEY;
@@ -141,6 +169,24 @@ export class LeverMCP extends McpAgent {
 
 		// Register additional tools to complete the set of 16
 		registerAdditionalTools(this.server, this.client);
+		
+		// Mark tools as registered
+		this.toolsRegistered = true;
+		console.log("✅ Tools registered successfully");
+		
+		// Log all registered tools to help debug ghost tools
+		console.log("=== LEVER MCP: All registered tools ===");
+		const tools = (this.server as any)._tools || (this.server as any).tools || [];
+		if (Array.isArray(tools)) {
+			tools.forEach((tool: any) => {
+				console.log(`- ${tool.name || tool}`);
+			});
+		} else if (typeof tools === 'object') {
+			Object.keys(tools).forEach(toolName => {
+				console.log(`- ${toolName}`);
+			});
+		}
+		console.log("=== End of registered tools ===");
 	}
 
 	private registerSearchTools() {
@@ -1403,58 +1449,159 @@ export class LeverMCP extends McpAgent {
 			},
 		);
 	}
-}
 
-export default {
-	fetch(request: Request, env: Env, ctx: ExecutionContext) {
+	// Handle incoming requests
+	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
-
+		
+		// Handle SSE endpoint
 		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-			return LeverMCP.serveSSE("/sse").fetch(request, env, ctx);
+			console.log("SSE request received");
+			
+			// For SSE, we need to handle the message protocol directly
+			const { readable, writable } = new TransformStream();
+			const writer = writable.getWriter();
+			const encoder = new TextEncoder();
+			
+			// Handle POST messages (MCP protocol messages)
+			if (request.method === "POST" && url.pathname === "/sse/message") {
+				try {
+					const message = await request.json() as {
+						id?: string | number;
+						method?: string;
+						params?: {
+							name?: string;
+							arguments?: any;
+						};
+					};
+					console.log("Received MCP message:", message);
+					
+					// Handle different message types
+					let response;
+					if (message.method === "tools/list") {
+						// Return the list of available tools
+						const tools = (this.server as any)._registeredTools || new Map();
+						response = {
+							id: message.id,
+							result: {
+								tools: Array.from(tools as Map<string, any>).map(([name, tool]) => ({
+									name,
+									description: tool.description,
+									inputSchema: tool.inputSchema
+								}))
+							}
+						};
+					} else if (message.method === "tools/call") {
+						// Call a specific tool
+						const toolName = message.params?.name;
+						const toolArgs = message.params?.arguments;
+						
+						// Find and execute the tool
+						const tools = (this.server as any)._registeredTools;
+						if (tools && tools.has(toolName)) {
+							const tool = tools.get(toolName);
+							const result = await tool.handler(toolArgs);
+							response = {
+								id: message.id,
+								result
+							};
+						} else {
+							response = {
+								id: message.id,
+								error: {
+									code: -32601,
+									message: `Tool not found: ${toolName}`
+								}
+							};
+						}
+					} else {
+						response = {
+							id: message.id,
+							error: {
+								code: -32601,
+								message: `Method not found: ${message.method}`
+							}
+						};
+					}
+					
+					// Return the response as JSON
+					return new Response(JSON.stringify(response), {
+						headers: { "Content-Type": "application/json" }
+					});
+				} catch (error) {
+					console.error("Error handling message:", error);
+					return new Response(JSON.stringify({
+						error: {
+							code: -32603,
+							message: "Internal error"
+						}
+					}), {
+						status: 500,
+						headers: { "Content-Type": "application/json" }
+					});
+				}
+			}
+			
+			// For GET requests, set up SSE stream
+			const sendMessage = async (data: any) => {
+				const sseMessage = `data: ${JSON.stringify(data)}\n\n`;
+				await writer.write(encoder.encode(sseMessage));
+			};
+			
+			// Send initial connection message
+			sendMessage({ type: "connection", status: "connected" });
+			
+			// Keep connection alive
+			const keepAlive = setInterval(() => {
+				sendMessage({ type: "ping" });
+			}, 30000);
+			
+			// Clean up on disconnect
+			request.signal.addEventListener("abort", () => {
+				clearInterval(keepAlive);
+				writer.close();
+			});
+			
+			// Return SSE response
+			return new Response(readable, {
+				headers: {
+					'Content-Type': 'text/event-stream',
+					'Cache-Control': 'no-cache',
+					'Connection': 'keep-alive',
+				},
+			});
 		}
-
-		if (url.pathname === "/mcp") {
-			return LeverMCP.serve("/mcp").fetch(request, env, ctx);
-		}
-
+		
 		// Health check
 		if (url.pathname === "/health") {
 			return new Response("OK", { status: 200 });
 		}
-
-		// Default response with instructions
+		
+		// Default response
 		return new Response(
-			JSON.stringify(
-				{
-					name: "Lever MCP Server",
-					description: "Remote MCP server for Lever ATS integration",
-					version: "1.0.0",
-					endpoints: {
-						sse: "/sse",
-						mcp: "/mcp",
-						health: "/health",
-					},
-					instructions: {
-						claude:
-							"Use: npx mcp-remote " +
-							request.url.split("/")[0] +
-							"//" +
-							request.headers.get("host") +
-							"/sse",
-						inspector:
-							"Connect to: " +
-							request.url.split("/")[0] +
-							"//" +
-							request.headers.get("host") +
-							"/sse",
-					},
+			JSON.stringify({
+				name: "Lever MCP Server",
+				description: "Remote MCP server for Lever ATS integration",
+				version: "1.0.0",
+				endpoints: {
+					sse: "/sse",
+					health: "/health",
 				},
-				null,
-				2,
-			),
+				note: "This server uses Server-Sent Events (SSE) for communication"
+			}, null, 2),
 			{
-				headers: { "Content-Type": "application/json" },
-			},
+				status: 200,
+				headers: { "Content-Type": "application/json" }
+			}
 		);
-	},
+	}
+}
+
+export default {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+		// All requests go through the Durable Object
+		const id = env.LEVER_MCP.idFromName("main");
+		const stub = env.LEVER_MCP.get(id);
+		return stub.fetch(request);
+	}
 };
