@@ -1274,54 +1274,6 @@ export function registerAdditionalTools(
 		},
 	);
 
-	// Tool 11: List all files for a candidate
-	server.tool(
-		"lever_list_files",
-		{
-			opportunity_id: z.string().describe("The candidate's opportunity ID"),
-		},
-		async (args) => {
-			try {
-				const files = await client.getFiles(args.opportunity_id);
-
-				// Format file information
-				const fileList = files.map((file: any) => ({
-					name: file.name || "Unnamed file",
-					downloadUrl: file.downloadUrl || "Not available",
-					ext: file.ext || "Unknown",
-					uploadedAt: file.uploadedAt
-						? new Date(file.uploadedAt).toISOString()
-						: "Unknown",
-				}));
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Files for candidate ${args.opportunity_id}:\n\n${JSON.stringify(
-								{
-									count: fileList.length,
-									files: fileList,
-								},
-								null,
-								2,
-							)}`,
-						},
-					],
-				};
-			} catch (error: any) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Error listing files: ${error.message}`,
-						},
-					],
-				};
-			}
-		},
-	);
-
 	// Tool 12: Search archived candidates with interview data
 	server.tool(
 		"lever_search_archived_candidates",

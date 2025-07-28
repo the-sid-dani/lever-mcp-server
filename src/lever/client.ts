@@ -431,15 +431,4 @@ export class LeverClient {
 
 		return this.makeRequest("GET", "/opportunities", queryParams);
 	}
-
-	// Add method to get files for a candidate
-	async getFiles(opportunityId: string): Promise<any[]> {
-		try {
-			const response = await this.makeRequest("GET", `/opportunities/${opportunityId}/files`);
-			return response.data || [];
-		} catch (error) {
-			console.warn(`Failed to get files for opportunity ${opportunityId}:`, error);
-			return [];
-		}
-	}
 }
