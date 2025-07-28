@@ -7,7 +7,7 @@ import { registerAdditionalTools } from "./additional-tools";
 // Environment interface
 interface Env {
 	LEVER_API_KEY: string;
-	LEVER_MCP: DurableObjectNamespace;
+	MCP_OBJECT: DurableObjectNamespace;
 }
 
 // Helper to format opportunity data
@@ -1600,8 +1600,8 @@ export class LeverMCP {
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		// All requests go through the Durable Object
-		const id = env.LEVER_MCP.idFromName("main");
-		const stub = env.LEVER_MCP.get(id);
+		const id = env.MCP_OBJECT.idFromName("main");
+		const stub = env.MCP_OBJECT.get(id);
 		return stub.fetch(request);
 	}
 };
