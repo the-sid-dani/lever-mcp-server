@@ -1206,13 +1206,34 @@ export function registerAdditionalTools(
 
 				// Get postings by ID (preferred) or name
 				if (args.owner_id) {
-					// More efficient: Get all postings and filter by owner ID
+					// More efficient: Get multiple batches of postings and filter by owner ID
 					// Expand both owner and hiringManager to get names
-					postingsResponse = await client.getPostings("published", 100, undefined, ["owner", "hiringManager"]);
-					subrequestCount++;
+					const allPostings: any[] = [];
+					let offset: string | undefined;
+					let batchesFetched = 0;
+					const maxBatches = 5; // Fetch up to 500 postings (5 batches of 100)
+					
+					// Fetch multiple batches to increase coverage
+					while (batchesFetched < maxBatches && subrequestCount < 40) {
+						const batchResponse = await client.getPostings("published", 100, offset, ["owner", "hiringManager"]);
+						subrequestCount++;
+						
+						if (batchResponse.data && batchResponse.data.length > 0) {
+							allPostings.push(...batchResponse.data);
+						}
+						
+						batchesFetched++;
+						
+						// Stop if no more data
+						if (!batchResponse.hasNext || !batchResponse.next) {
+							break;
+						}
+						
+						offset = batchResponse.next;
+					}
 					
 					// Filter by owner ID
-					const filteredPostings = postingsResponse.data.filter(posting => {
+					const filteredPostings = allPostings.filter(posting => {
 						if (typeof posting.owner === 'object' && posting.owner?.id) {
 							return posting.owner.id === args.owner_id;
 						}

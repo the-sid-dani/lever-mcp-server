@@ -233,18 +233,15 @@ export class LeverClient {
 		}
 		
 		// Support for expanding user objects (owner, hiringManager, etc.)
+		// Lever API expects a comma-separated string for expand parameter
 		if (expand && expand.length > 0) {
-			expand.forEach(field => {
-				// Lever API accepts multiple expand parameters
-				params[`expand`] = field;
-			});
+			params.expand = expand.join(',');
 		}
 		
 		// Support for including optional fields
+		// Lever API expects a comma-separated string for include parameter
 		if (include && include.length > 0) {
-			include.forEach(field => {
-				params[`include`] = field;
-			});
+			params.include = include.join(',');
 		}
 		
 		return this.makeRequest<LeverApiResponse<LeverPosting>>(

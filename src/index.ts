@@ -987,21 +987,45 @@ export class LeverMCP extends McpAgent {
 					let response;
 
 					if (args.owner_id) {
-						// More efficient: Get all postings and filter by owner ID
+						// More efficient: Get multiple batches of postings and filter by owner ID
 						// Expand both owner and hiringManager to get names
-						const allPostingsResponse = await this.client.getPostings(args.state, args.limit, undefined, ["owner", "hiringManager"]);
+						const allPostings: LeverPosting[] = [];
+						let offset: string | undefined;
+						let batchesFetched = 0;
+						const maxBatches = 5; // Fetch up to 500 postings (5 batches of 100)
+						
+						// Fetch multiple batches to increase coverage
+						while (batchesFetched < maxBatches) {
+							const batchResponse = await this.client.getPostings(args.state, 100, offset, ["owner", "hiringManager"]);
+							
+							if (batchResponse.data && batchResponse.data.length > 0) {
+								allPostings.push(...batchResponse.data);
+							}
+							
+							batchesFetched++;
+							
+							// Stop if no more data
+							if (!batchResponse.hasNext || !batchResponse.next) {
+								break;
+							}
+							
+							offset = batchResponse.next;
+						}
 						
 						// Filter by owner ID
-						const filteredPostings = allPostingsResponse.data.filter(posting => {
+						const filteredPostings = allPostings.filter(posting => {
 							if (typeof posting.owner === 'object' && posting.owner?.id) {
 								return posting.owner.id === args.owner_id;
 							}
 							return false;
 						});
 						
+						// Apply the limit after filtering
+						const limitedPostings = args.limit ? filteredPostings.slice(0, args.limit) : filteredPostings;
+						
 						response = {
-							data: filteredPostings,
-							hasNext: false,
+							data: limitedPostings,
+							hasNext: filteredPostings.length > args.limit,
 							next: undefined,
 						};
 					} else {
