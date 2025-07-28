@@ -1160,12 +1160,13 @@ export function registerAdditionalTools(
 			include_interviews: z.boolean().default(true).describe("Include upcoming interview data (limited to stay under API limits)"),
 			days_ahead: z.number().default(7).describe("How many days ahead to look for interviews"),
 			stage_filter: z.string().optional().describe("Optional: Filter candidates by specific stage"),
-			max_candidates_per_posting: z.number().default(20).describe("Max candidates per posting to prevent subrequest limit (default: 20)"),
+			max_candidates_per_posting: z.number().default(100).describe("Max candidates per posting to prevent subrequest limit (default: 100, use -1 for ALL)"),
 			// New pagination parameters
 			page: z.number().default(1).describe("Page number for posting pagination (1-based)"),
 			postings_per_page: z.number().default(5).describe("Number of postings per page (default: 5, max: 10)"),
 			summary_mode: z.boolean().default(true).describe("Return summary statistics instead of full candidate details"),
 			include_candidate_details: z.string().optional().describe("Comma-separated posting IDs to include full candidate details for specific postings only"),
+			focus_interviews_only: z.boolean().default(false).describe("Only include candidates with upcoming interviews"),
 		},
 		async (args) => {
 			try {
@@ -1188,6 +1189,20 @@ export function registerAdditionalTools(
 				const startTime = Date.now();
 				let postingsResponse;
 				let subrequestCount = 0; // Track API calls to stay under 50
+
+				// Get stage mapping to convert IDs to names
+				let stageMap: Record<string, string> = {};
+				try {
+					const stagesResponse = await client.getStages();
+					subrequestCount++;
+					if (stagesResponse.data) {
+						for (const stage of stagesResponse.data) {
+							stageMap[stage.id] = stage.text;
+						}
+					}
+				} catch (error) {
+					console.warn("Could not fetch stages for mapping:", error);
+				}
 
 				// Get postings by ID (preferred) or name
 				if (args.owner_id) {
@@ -1251,33 +1266,64 @@ export function registerAdditionalTools(
 				let totalCandidates = 0;
 				let totalInterviewsScheduled = 0;
 				let stageDistribution: Record<string, number> = {};
+				let candidatesWithInterviewsList: any[] = [];
 
 				// Process each posting on current page
 				for (const posting of paginatedPostings) {
 					// Stop if we're getting close to the limit
-					if (subrequestCount >= 45) {
+					if (subrequestCount >= 40) {
 						console.warn(`Stopping early to avoid subrequest limit. Processed ${postingSummaries.length} postings.`);
 						break;
 					}
 
-					// Get candidate count and basic stats
-					const candidatesResponse = await client.getOpportunities({
-						posting_id: posting.id,
-						stage_id: args.stage_filter,
-						limit: args.summary_mode && !detailedPostingIds.includes(posting.id) 
-							? 100  // Just for counting in summary mode
-							: args.max_candidates_per_posting,
-					});
-					subrequestCount++;
+					// Determine how many candidates to fetch
+					let candidateLimit = args.max_candidates_per_posting;
+					let allPostingCandidates: any[] = [];
+					let offset: string | undefined;
+					
+					// If we want ALL candidates (-1) or need accurate counts, fetch all
+					if (candidateLimit === -1 || args.focus_interviews_only || !args.summary_mode) {
+						// Fetch ALL candidates for this posting in batches
+						while (subrequestCount < 40) {
+							const batchResponse = await client.getOpportunities({
+								posting_id: posting.id,
+								stage_id: args.stage_filter,
+								limit: 100,
+								offset: offset,
+							});
+							subrequestCount++;
+							
+							if (!batchResponse.data || batchResponse.data.length === 0) break;
+							allPostingCandidates.push(...batchResponse.data);
+							
+							if (!batchResponse.hasNext || !batchResponse.next) break;
+							offset = batchResponse.next;
+						}
+					} else {
+						// Just fetch the requested limit
+						const candidatesResponse = await client.getOpportunities({
+							posting_id: posting.id,
+							stage_id: args.stage_filter,
+							limit: candidateLimit,
+						});
+						subrequestCount++;
+						allPostingCandidates = candidatesResponse.data || [];
+					}
 
-					const candidates = candidatesResponse.data || [];
+					const candidates = allPostingCandidates;
 					totalCandidates += candidates.length;
 
-					// Track stage distribution
+					// Track stage distribution with proper stage names
 					for (const candidate of candidates) {
-						const stageName = typeof candidate.stage === 'object' && candidate.stage?.text 
-							? candidate.stage.text 
-							: 'Unknown';
+						// Get stage name from map or use the stage value as-is
+						let stageName = "Unknown Stage";
+						if (typeof candidate.stage === 'object' && candidate.stage?.text) {
+							stageName = candidate.stage.text;
+						} else if (typeof candidate.stage === 'string' && stageMap[candidate.stage]) {
+							stageName = stageMap[candidate.stage];
+						} else if (candidate.stage) {
+							stageName = String(candidate.stage);
+						}
 						stageDistribution[stageName] = (stageDistribution[stageName] || 0) + 1;
 					}
 
@@ -1287,77 +1333,116 @@ export function registerAdditionalTools(
 						title: posting.text || "Unknown",
 						location: posting.categories?.location || "Unknown",
 						team: posting.categories?.team || "Unknown",
-						candidate_count: candidates.length,
+						total_candidates: candidates.length,
 						stage_breakdown: {} as Record<string, number>,
 					};
 
 					// Calculate stage breakdown for this posting
 					const postingStages: Record<string, number> = {};
 					for (const candidate of candidates) {
-						const stageName = typeof candidate.stage === 'object' && candidate.stage?.text 
-							? candidate.stage.text 
-							: 'Unknown';
+						// Get stage name from map or use the stage value as-is
+						let stageName = "Unknown Stage";
+						if (typeof candidate.stage === 'object' && candidate.stage?.text) {
+							stageName = candidate.stage.text;
+						} else if (typeof candidate.stage === 'string' && stageMap[candidate.stage]) {
+							stageName = stageMap[candidate.stage];
+						} else if (candidate.stage) {
+							stageName = String(candidate.stage);
+						}
 						postingStages[stageName] = (postingStages[stageName] || 0) + 1;
 					}
 					postingSummary.stage_breakdown = postingStages;
 
-					// Only include full candidate details if requested for this posting
-					if (!args.summary_mode || detailedPostingIds.includes(posting.id)) {
-						postingSummary.candidates = candidates.slice(0, args.max_candidates_per_posting).map(formatOpportunity);
-					}
-
-					// Interview summary (if enabled and API calls available)
+					// Interview tracking
+					let candidatesWithInterviews: any[] = [];
+					
 					if (args.include_interviews && subrequestCount < 40) {
-						let interviewCount = 0;
-						let upcomingInterviews = [];
+						// For interview focus mode, check ALL candidates
+						const candidatesToCheck = args.focus_interviews_only ? candidates : candidates.slice(0, 20);
 						
-						// Sample a few candidates for interview checking (max 5)
-						const sampleSize = Math.min(5, candidates.length);
-						const candidateSample = candidates.slice(0, sampleSize);
-
-						for (const candidate of candidateSample) {
+						for (const candidate of candidatesToCheck) {
 							if (subrequestCount >= 45) break;
 							
 							try {
 								const interviews = await client.getOpportunityInterviews(candidate.id);
 								subrequestCount++;
 
-								const upcoming = interviews.data?.filter((interview: any) => {
+								const upcomingInterviews = (interviews.data || []).filter((interview: any) => {
 									if (!interview.date) return false;
 									const interviewDate = new Date(interview.date);
 									const now = new Date();
 									const cutoff = new Date(now.getTime() + (args.days_ahead * 24 * 60 * 60 * 1000));
 									return interviewDate >= now && interviewDate <= cutoff;
-								}) || [];
+								});
 
-								if (upcoming.length > 0) {
-									interviewCount += upcoming.length;
-									// Only store interview details if not in summary mode
-									if (!args.summary_mode || detailedPostingIds.includes(posting.id)) {
-										upcomingInterviews.push({
-											candidate_name: candidate.name || "Unknown",
-											candidate_id: candidate.id,
-											interview_count: upcoming.length,
-											next_interview: upcoming[0].date ? new Date(upcoming[0].date).toISOString() : "Unknown",
-										});
-									}
+								if (upcomingInterviews.length > 0) {
+									totalInterviewsScheduled += upcomingInterviews.length;
+									const candidateWithInterview = {
+										// Format with proper posting name
+										id: candidate.id,
+										name: candidate.name || "Unknown",
+										email: candidate.emails?.[0] || "N/A",
+										stage: typeof candidate.stage === 'object' && candidate.stage?.text 
+											? candidate.stage.text 
+											: (typeof candidate.stage === 'string' && stageMap[candidate.stage] 
+												? stageMap[candidate.stage] 
+												: (candidate.stage || 'Unknown Stage')),
+										posting: posting.text || "Unknown",
+										location: candidate.location || "Unknown",
+										organizations: candidate.headline || "",
+										created: candidate.createdAt
+											? new Date(candidate.createdAt).toISOString().split("T")[0]
+											: "Unknown",
+										upcoming_interviews: upcomingInterviews.map((interview: any) => ({
+											id: interview.id,
+											subject: interview.subject || "Interview",
+											date: interview.date ? new Date(interview.date).toISOString() : "Unknown",
+											interviewers: interview.interviewers?.map((i: any) => i.name || i.email || "Unknown") || [],
+											location: interview.location || "Not specified",
+											duration: interview.duration || "Unknown",
+										})),
+									};
+									candidatesWithInterviews.push(candidateWithInterview);
+									candidatesWithInterviewsList.push(candidateWithInterview);
 								}
 							} catch (error) {
 								// Continue if interview data not available
 							}
 						}
+					}
+					
+					// Add interview data to posting summary
+					if (candidatesWithInterviews.length > 0) {
+						postingSummary.candidates_with_interviews = candidatesWithInterviews;
+						postingSummary.interview_count = candidatesWithInterviews.reduce((sum, c) => sum + c.upcoming_interviews.length, 0);
+					} else {
+						postingSummary.interview_count = 0;
+					}
 
-						postingSummary.upcoming_interviews_count = interviewCount;
-						totalInterviewsScheduled += interviewCount;
-						
-						if (upcomingInterviews.length > 0 && (!args.summary_mode || detailedPostingIds.includes(posting.id))) {
-							postingSummary.upcoming_interviews_sample = upcomingInterviews;
-						}
-						
-						// Add note if we only sampled
-						if (sampleSize < candidates.length) {
-							postingSummary.interview_data_note = `Sampled ${sampleSize} of ${candidates.length} candidates for interview data`;
-						}
+					// Only include full candidate details if requested for this posting
+					if (!args.summary_mode || detailedPostingIds.includes(posting.id)) {
+						// Format candidates with proper posting name
+						postingSummary.candidates = candidates.slice(0, args.max_candidates_per_posting > 0 ? args.max_candidates_per_posting : undefined).map(c => ({
+							id: c.id || "",
+							name: c.name || "Unknown",
+							email: c.emails?.[0] || "N/A",
+							stage: typeof c.stage === 'object' && c.stage?.text 
+								? c.stage.text 
+								: (typeof c.stage === 'string' && stageMap[c.stage] 
+									? stageMap[c.stage] 
+									: (c.stage || 'Unknown Stage')),
+							posting: posting.text || "Unknown", // Use posting name, not "Unknown"
+							location: c.location || "Unknown",
+							organizations: c.headline || "",
+							created: c.createdAt
+								? new Date(c.createdAt).toISOString().split("T")[0]
+								: "Unknown",
+						}));
+					}
+
+					// Add note about data completeness
+					if (candidateLimit > 0 && candidates.length >= candidateLimit && candidateLimit !== -1) {
+						postingSummary.data_note = `Showing first ${candidateLimit} candidates. Use max_candidates_per_posting: -1 to fetch all.`;
 					}
 
 					postingSummaries.push(postingSummary);
@@ -1384,7 +1469,7 @@ export function registerAdditionalTools(
 					summary: {
 						postings_on_page: postingSummaries.length,
 						total_candidates_on_page: totalCandidates,
-						total_interviews_scheduled: args.include_interviews ? totalInterviewsScheduled : "Not calculated",
+						total_interviews_scheduled: totalInterviewsScheduled,
 						stage_distribution: stageDistribution,
 						display_mode: args.summary_mode ? "summary" : "detailed",
 					},
@@ -1396,15 +1481,24 @@ export function registerAdditionalTools(
 						used_owner_id: !!args.owner_id,
 					},
 					
+					// Interview focus section
+					interview_summary: args.include_interviews ? {
+						total_candidates_with_interviews: candidatesWithInterviewsList.length,
+						total_interviews_in_next_days: totalInterviewsScheduled,
+						days_ahead: args.days_ahead,
+						candidates_with_upcoming_interviews: args.focus_interviews_only ? candidatesWithInterviewsList : candidatesWithInterviewsList.slice(0, 10),
+					} : null,
+					
 					// Posting data (summary or detailed based on mode)
 					postings: postingSummaries,
 				};
 
-				// Add recommendations if in summary mode
+				// Add recommendations
 				if (args.summary_mode) {
 					dashboardSummary.recommendations = {
 						view_details: "To see full candidate details for specific postings, use include_candidate_details parameter with posting IDs",
-						example: `include_candidate_details: "${postingSummaries[0]?.id || 'posting_id'}"`,
+						get_all_candidates: "Use max_candidates_per_posting: -1 to fetch ALL candidates (may hit API limits)",
+						focus_interviews: "Use focus_interviews_only: true to only see candidates with upcoming interviews",
 					};
 				}
 
