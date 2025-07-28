@@ -1155,15 +1155,57 @@ export function registerAdditionalTools(
 	server.tool(
 		"lever_recruiter_dashboard",
 		{
-			owner_name: z.string().describe("Name of the posting owner/recruiter (e.g., 'ciarli bolden')"),
-			include_interviews: z.boolean().default(true).describe("Include upcoming interview data"),
+			owner_name: z.string().optional().describe("Name of the posting owner/recruiter (e.g., 'ciarli bolden') - use owner_id if available for better performance"),
+			owner_id: z.string().optional().describe("Owner/recruiter ID (more reliable than name) - get this from lever_list_open_roles"),
+			include_interviews: z.boolean().default(true).describe("Include upcoming interview data (limited to stay under API limits)"),
 			days_ahead: z.number().default(7).describe("How many days ahead to look for interviews"),
 			stage_filter: z.string().optional().describe("Optional: Filter candidates by specific stage"),
+			max_candidates_per_posting: z.number().default(20).describe("Max candidates per posting to prevent subrequest limit (default: 20)"),
 		},
 		async (args) => {
 			try {
-				// Get all postings for this owner
-				const postingsResponse = await client.getPostingsByOwner(args.owner_name);
+				// Validate input
+				if (!args.owner_name && !args.owner_id) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									error: "Either owner_name or owner_id is required",
+									suggestion: "Use lever_list_open_roles to get owner IDs for better performance",
+								}, null, 2),
+							},
+						],
+					};
+				}
+
+				let postingsResponse;
+				let subrequestCount = 0; // Track API calls to stay under 50
+
+				// Get postings by ID (preferred) or name
+				if (args.owner_id) {
+					// More efficient: Get all postings and filter by owner ID
+					postingsResponse = await client.getPostings("published", 50, undefined, ["owner"]);
+					subrequestCount++;
+					
+					// Filter by owner ID
+					const filteredPostings = postingsResponse.data.filter(posting => {
+						if (typeof posting.owner === 'object' && posting.owner?.id) {
+							return posting.owner.id === args.owner_id;
+						}
+						return false;
+					});
+					
+					postingsResponse = {
+						data: filteredPostings,
+						hasNext: false,
+						next: undefined,
+					};
+				} else {
+					// Fallback: Search by name (less efficient)
+					postingsResponse = await client.getPostingsByOwner(args.owner_name!);
+					subrequestCount++;
+				}
 				
 				if (postingsResponse.data.length === 0) {
 					return {
@@ -1171,26 +1213,37 @@ export function registerAdditionalTools(
 							{
 								type: "text",
 								text: JSON.stringify({
-									recruiter: args.owner_name,
+									recruiter: args.owner_name || args.owner_id,
 									message: "No postings found for this recruiter",
-									suggestion: "Check the spelling of the recruiter name or try a partial match",
+									suggestion: args.owner_name ? "Try using owner_id instead of owner_name, or check spelling" : "Check the owner_id is correct",
 								}, null, 2),
 							},
 						],
 					};
 				}
 
-				// Get candidates for each posting
+				// Limit postings to prevent subrequest overflow
+				const maxPostings = Math.min(postingsResponse.data.length, 10); // Max 10 postings
+				const limitedPostings = postingsResponse.data.slice(0, maxPostings);
+
 				const results = [];
 				let totalCandidates = 0;
 				let candidatesWithInterviews = 0;
+				let interviewCallsRemaining = Math.max(0, 45 - subrequestCount - limitedPostings.length); // Reserve calls for interviews
 
-				for (const posting of postingsResponse.data) {
+				for (const posting of limitedPostings) {
+					// Stop if we're getting close to the limit
+					if (subrequestCount >= 45) {
+						console.warn(`Stopping early to avoid subrequest limit. Processed ${results.length} postings.`);
+						break;
+					}
+
 					const candidatesResponse = await client.getOpportunities({
 						posting_id: posting.id,
 						stage_id: args.stage_filter,
-						limit: 100,
+						limit: args.max_candidates_per_posting,
 					});
+					subrequestCount++;
 
 					totalCandidates += candidatesResponse.data.length;
 
@@ -1199,13 +1252,28 @@ export function registerAdditionalTools(
 						candidate_count: candidatesResponse.data.length,
 						candidates: candidatesResponse.data.map(formatOpportunity),
 						candidates_with_upcoming_interviews: [] as any[],
+						interview_fetch_limited: false,
 					};
 
-					// If interviews requested, get interview data
-					if (args.include_interviews) {
-						for (const candidate of candidatesResponse.data) {
+					// Selective interview fetching to stay under subrequest limit
+					if (args.include_interviews && interviewCallsRemaining > 0) {
+						// Limit candidates for interview fetching
+						const candidatesForInterviews = candidatesResponse.data.slice(0, Math.min(
+							candidatesResponse.data.length, 
+							Math.min(10, interviewCallsRemaining) // Max 10 candidates per posting or remaining calls
+						));
+
+						for (const candidate of candidatesForInterviews) {
+							if (interviewCallsRemaining <= 0) {
+								postingData.interview_fetch_limited = true;
+								break;
+							}
+
 							try {
 								const interviews = await client.getOpportunityInterviews(candidate.id);
+								subrequestCount++;
+								interviewCallsRemaining--;
+
 								const upcomingInterviews = interviews.data?.filter((interview: any) => {
 									if (!interview.date) return false;
 									const interviewDate = new Date(interview.date);
@@ -1239,13 +1307,22 @@ export function registerAdditionalTools(
 				}
 
 				const summary = {
-					recruiter: args.owner_name,
+					recruiter: args.owner_name || args.owner_id,
 					total_postings: results.length,
+					total_postings_found: postingsResponse.data.length,
+					posting_limit_applied: postingsResponse.data.length > maxPostings,
 					total_candidates: totalCandidates,
 					candidates_with_upcoming_interviews: candidatesWithInterviews,
 					includes_interviews: args.include_interviews,
+					interview_fetch_limited: results.some(p => p.interview_fetch_limited),
 					days_ahead: args.days_ahead,
 					stage_filter: args.stage_filter || "all_stages",
+					api_calls_used: subrequestCount,
+					performance_notes: {
+						used_owner_id: !!args.owner_id,
+						max_candidates_per_posting: args.max_candidates_per_posting,
+						subrequest_limit_reached: subrequestCount >= 45,
+					},
 					postings: results,
 				};
 
@@ -1264,7 +1341,7 @@ export function registerAdditionalTools(
 							type: "text",
 							text: JSON.stringify({
 								error: error instanceof Error ? error.message : String(error),
-								recruiter: args.owner_name,
+								recruiter: args.owner_name || args.owner_id,
 								note: "Make sure the recruiter name is spelled correctly. Try using partial names like 'ciarli' instead of full names.",
 							}),
 						},

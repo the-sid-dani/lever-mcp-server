@@ -824,17 +824,55 @@ export class LeverMCP extends McpAgent {
 			};
 		});
 
-		// Find postings by owner/recruiter name
+		// Find postings by owner/recruiter name or ID
 		this.server.tool(
 			"lever_find_postings_by_owner",
 			{
-				owner_name: z.string().describe("Name of the posting owner/recruiter (partial match supported)"),
+				owner_name: z.string().optional().describe("Name of the posting owner/recruiter (partial match supported) - use owner_id if available for better performance"),
+				owner_id: z.string().optional().describe("Owner/recruiter ID (more reliable than name)"),
 				state: z.enum(["published", "closed", "draft", "pending", "rejected"]).default("published"),
 				limit: z.number().default(50),
 			},
 			async (args) => {
 				try {
-					const response = await this.client.getPostingsByOwner(args.owner_name, args.state);
+					// Validate input
+					if (!args.owner_name && !args.owner_id) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										error: "Either owner_name or owner_id is required",
+										suggestion: "Use lever_list_open_roles to get owner IDs for better performance",
+									}, null, 2),
+								},
+							],
+						};
+					}
+
+					let response;
+
+					if (args.owner_id) {
+						// More efficient: Get all postings and filter by owner ID
+						const allPostingsResponse = await this.client.getPostings(args.state, args.limit, undefined, ["owner"]);
+						
+						// Filter by owner ID
+						const filteredPostings = allPostingsResponse.data.filter(posting => {
+							if (typeof posting.owner === 'object' && posting.owner?.id) {
+								return posting.owner.id === args.owner_id;
+							}
+							return false;
+						});
+						
+						response = {
+							data: filteredPostings,
+							hasNext: false,
+							next: undefined,
+						};
+					} else {
+						// Fallback: Search by name (less efficient)
+						response = await this.client.getPostingsByOwner(args.owner_name!, args.state);
+					}
 					
 					return {
 						content: [
@@ -842,7 +880,8 @@ export class LeverMCP extends McpAgent {
 								type: "text",
 								text: JSON.stringify({
 									count: response.data.length,
-									owner_searched: args.owner_name,
+									owner_searched: args.owner_name || args.owner_id,
+									search_method: args.owner_id ? "ID (efficient)" : "Name (less efficient)",
 									state_filter: args.state,
 									postings: response.data.map(formatPosting),
 								}, null, 2),
@@ -856,6 +895,7 @@ export class LeverMCP extends McpAgent {
 								type: "text",
 								text: JSON.stringify({
 									error: error instanceof Error ? error.message : String(error),
+									owner_searched: args.owner_name || args.owner_id,
 								}),
 							},
 						],
