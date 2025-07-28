@@ -1161,6 +1161,11 @@ export function registerAdditionalTools(
 			days_ahead: z.number().default(7).describe("How many days ahead to look for interviews"),
 			stage_filter: z.string().optional().describe("Optional: Filter candidates by specific stage"),
 			max_candidates_per_posting: z.number().default(20).describe("Max candidates per posting to prevent subrequest limit (default: 20)"),
+			// New pagination parameters
+			page: z.number().default(1).describe("Page number for posting pagination (1-based)"),
+			postings_per_page: z.number().default(5).describe("Number of postings per page (default: 5, max: 10)"),
+			summary_mode: z.boolean().default(true).describe("Return summary statistics instead of full candidate details"),
+			include_candidate_details: z.string().optional().describe("Comma-separated posting IDs to include full candidate details for specific postings only"),
 		},
 		async (args) => {
 			try {
@@ -1179,13 +1184,15 @@ export function registerAdditionalTools(
 					};
 				}
 
+				// Performance tracking
+				const startTime = Date.now();
 				let postingsResponse;
 				let subrequestCount = 0; // Track API calls to stay under 50
 
 				// Get postings by ID (preferred) or name
 				if (args.owner_id) {
 					// More efficient: Get all postings and filter by owner ID
-					postingsResponse = await client.getPostings("published", 50, undefined, ["owner"]);
+					postingsResponse = await client.getPostings("published", 100, undefined, ["owner"]);
 					subrequestCount++;
 					
 					// Filter by owner ID
@@ -1222,59 +1229,98 @@ export function registerAdditionalTools(
 					};
 				}
 
-				// Limit postings to prevent subrequest overflow
-				const maxPostings = Math.min(postingsResponse.data.length, 10); // Max 10 postings
-				const limitedPostings = postingsResponse.data.slice(0, maxPostings);
+				// Apply pagination to postings
+				const allPostings = postingsResponse.data;
+				const totalPostings = allPostings.length;
+				const page = Math.max(1, args.page);
+				const postingsPerPage = Math.min(Math.max(1, args.postings_per_page), 10); // Cap at 10
+				const startIndex = (page - 1) * postingsPerPage;
+				const endIndex = startIndex + postingsPerPage;
+				const paginatedPostings = allPostings.slice(startIndex, endIndex);
+				const totalPages = Math.ceil(totalPostings / postingsPerPage);
+				const hasMorePages = page < totalPages;
 
-				const results = [];
+				// Parse which postings need detailed candidate data
+				const detailedPostingIds = args.include_candidate_details 
+					? args.include_candidate_details.split(',').map(id => id.trim())
+					: [];
+
+				const postingSummaries = [];
 				let totalCandidates = 0;
-				let candidatesWithInterviews = 0;
-				let interviewCallsRemaining = Math.max(0, 45 - subrequestCount - limitedPostings.length); // Reserve calls for interviews
+				let totalInterviewsScheduled = 0;
+				let stageDistribution: Record<string, number> = {};
 
-				for (const posting of limitedPostings) {
+				// Process each posting on current page
+				for (const posting of paginatedPostings) {
 					// Stop if we're getting close to the limit
 					if (subrequestCount >= 45) {
-						console.warn(`Stopping early to avoid subrequest limit. Processed ${results.length} postings.`);
+						console.warn(`Stopping early to avoid subrequest limit. Processed ${postingSummaries.length} postings.`);
 						break;
 					}
 
+					// Get candidate count and basic stats
 					const candidatesResponse = await client.getOpportunities({
 						posting_id: posting.id,
 						stage_id: args.stage_filter,
-						limit: args.max_candidates_per_posting,
+						limit: args.summary_mode && !detailedPostingIds.includes(posting.id) 
+							? 100  // Just for counting in summary mode
+							: args.max_candidates_per_posting,
 					});
 					subrequestCount++;
 
-					totalCandidates += candidatesResponse.data.length;
+					const candidates = candidatesResponse.data || [];
+					totalCandidates += candidates.length;
 
-					const postingData = {
-						...formatPosting(posting),
-						candidate_count: candidatesResponse.data.length,
-						candidates: candidatesResponse.data.map(formatOpportunity),
-						candidates_with_upcoming_interviews: [] as any[],
-						interview_fetch_limited: false,
+					// Track stage distribution
+					for (const candidate of candidates) {
+						const stageName = typeof candidate.stage === 'object' && candidate.stage?.text 
+							? candidate.stage.text 
+							: 'Unknown';
+						stageDistribution[stageName] = (stageDistribution[stageName] || 0) + 1;
+					}
+
+					// Build posting summary
+					const postingSummary: any = {
+						id: posting.id,
+						title: posting.text || "Unknown",
+						location: posting.categories?.location || "Unknown",
+						team: posting.categories?.team || "Unknown",
+						candidate_count: candidates.length,
+						stage_breakdown: {} as Record<string, number>,
 					};
 
-					// Selective interview fetching to stay under subrequest limit
-					if (args.include_interviews && interviewCallsRemaining > 0) {
-						// Limit candidates for interview fetching
-						const candidatesForInterviews = candidatesResponse.data.slice(0, Math.min(
-							candidatesResponse.data.length, 
-							Math.min(10, interviewCallsRemaining) // Max 10 candidates per posting or remaining calls
-						));
+					// Calculate stage breakdown for this posting
+					const postingStages: Record<string, number> = {};
+					for (const candidate of candidates) {
+						const stageName = typeof candidate.stage === 'object' && candidate.stage?.text 
+							? candidate.stage.text 
+							: 'Unknown';
+						postingStages[stageName] = (postingStages[stageName] || 0) + 1;
+					}
+					postingSummary.stage_breakdown = postingStages;
 
-						for (const candidate of candidatesForInterviews) {
-							if (interviewCallsRemaining <= 0) {
-								postingData.interview_fetch_limited = true;
-								break;
-							}
+					// Only include full candidate details if requested for this posting
+					if (!args.summary_mode || detailedPostingIds.includes(posting.id)) {
+						postingSummary.candidates = candidates.slice(0, args.max_candidates_per_posting).map(formatOpportunity);
+					}
 
+					// Interview summary (if enabled and API calls available)
+					if (args.include_interviews && subrequestCount < 40) {
+						let interviewCount = 0;
+						let upcomingInterviews = [];
+						
+						// Sample a few candidates for interview checking (max 5)
+						const sampleSize = Math.min(5, candidates.length);
+						const candidateSample = candidates.slice(0, sampleSize);
+
+						for (const candidate of candidateSample) {
+							if (subrequestCount >= 45) break;
+							
 							try {
 								const interviews = await client.getOpportunityInterviews(candidate.id);
 								subrequestCount++;
-								interviewCallsRemaining--;
 
-								const upcomingInterviews = interviews.data?.filter((interview: any) => {
+								const upcoming = interviews.data?.filter((interview: any) => {
 									if (!interview.date) return false;
 									const interviewDate = new Date(interview.date);
 									const now = new Date();
@@ -1282,55 +1328,89 @@ export function registerAdditionalTools(
 									return interviewDate >= now && interviewDate <= cutoff;
 								}) || [];
 
-								if (upcomingInterviews.length > 0) {
-									candidatesWithInterviews++;
-									postingData.candidates_with_upcoming_interviews.push({
-										...formatOpportunity(candidate),
-										upcoming_interviews: upcomingInterviews.map((interview: any) => ({
-											id: interview.id,
-											subject: interview.subject || "Interview",
-											date: interview.date ? new Date(interview.date).toISOString() : "Unknown",
-											interviewers: interview.interviewers?.map((i: any) => i.name || i.email || "Unknown") || [],
-											location: interview.location || "Not specified",
-											duration: interview.duration || "Unknown",
-										})),
-									});
+								if (upcoming.length > 0) {
+									interviewCount += upcoming.length;
+									// Only store interview details if not in summary mode
+									if (!args.summary_mode || detailedPostingIds.includes(posting.id)) {
+										upcomingInterviews.push({
+											candidate_name: candidate.name || "Unknown",
+											candidate_id: candidate.id,
+											interview_count: upcoming.length,
+											next_interview: upcoming[0].date ? new Date(upcoming[0].date).toISOString() : "Unknown",
+										});
+									}
 								}
 							} catch (error) {
-								// Continue if interview data not available for this candidate
-								console.log(`Could not fetch interviews for candidate ${candidate.id}:`, error);
+								// Continue if interview data not available
 							}
+						}
+
+						postingSummary.upcoming_interviews_count = interviewCount;
+						totalInterviewsScheduled += interviewCount;
+						
+						if (upcomingInterviews.length > 0 && (!args.summary_mode || detailedPostingIds.includes(posting.id))) {
+							postingSummary.upcoming_interviews_sample = upcomingInterviews;
+						}
+						
+						// Add note if we only sampled
+						if (sampleSize < candidates.length) {
+							postingSummary.interview_data_note = `Sampled ${sampleSize} of ${candidates.length} candidates for interview data`;
 						}
 					}
 
-					results.push(postingData);
+					postingSummaries.push(postingSummary);
 				}
 
-				const summary = {
+				// Build optimized response
+				const dashboardSummary: any = {
+					// Metadata
 					recruiter: args.owner_name || args.owner_id,
-					total_postings: results.length,
-					total_postings_found: postingsResponse.data.length,
-					posting_limit_applied: postingsResponse.data.length > maxPostings,
-					total_candidates: totalCandidates,
-					candidates_with_upcoming_interviews: candidatesWithInterviews,
-					includes_interviews: args.include_interviews,
-					interview_fetch_limited: results.some(p => p.interview_fetch_limited),
-					days_ahead: args.days_ahead,
-					stage_filter: args.stage_filter || "all_stages",
-					api_calls_used: subrequestCount,
-					performance_notes: {
-						used_owner_id: !!args.owner_id,
-						max_candidates_per_posting: args.max_candidates_per_posting,
-						subrequest_limit_reached: subrequestCount >= 45,
+					generated_at: new Date().toISOString(),
+					execution_time_ms: Date.now() - startTime,
+					
+					// Pagination info
+					pagination: {
+						current_page: page,
+						total_pages: totalPages,
+						postings_per_page: postingsPerPage,
+						total_postings: totalPostings,
+						has_next_page: hasMorePages,
+						next_page: hasMorePages ? page + 1 : null,
 					},
-					postings: results,
+					
+					// Summary statistics
+					summary: {
+						postings_on_page: postingSummaries.length,
+						total_candidates_on_page: totalCandidates,
+						total_interviews_scheduled: args.include_interviews ? totalInterviewsScheduled : "Not calculated",
+						stage_distribution: stageDistribution,
+						display_mode: args.summary_mode ? "summary" : "detailed",
+					},
+					
+					// Performance metrics
+					performance: {
+						api_calls_used: subrequestCount,
+						subrequest_limit_reached: subrequestCount >= 45,
+						used_owner_id: !!args.owner_id,
+					},
+					
+					// Posting data (summary or detailed based on mode)
+					postings: postingSummaries,
 				};
+
+				// Add recommendations if in summary mode
+				if (args.summary_mode) {
+					dashboardSummary.recommendations = {
+						view_details: "To see full candidate details for specific postings, use include_candidate_details parameter with posting IDs",
+						example: `include_candidate_details: "${postingSummaries[0]?.id || 'posting_id'}"`,
+					};
+				}
 
 				return {
 					content: [
 						{
 							type: "text",
-							text: JSON.stringify(summary, null, 2),
+							text: JSON.stringify(dashboardSummary, null, 2),
 						},
 					],
 				};
