@@ -139,6 +139,57 @@ export class LeverMCP extends McpAgent {
 		console.log(`[TRACE ${traceId}] [${timestamp}] ${message}`, data ? JSON.stringify(data) : '');
 	}
 
+	// Override onMessage to trace all incoming MCP messages
+	async onMessage(message: any, session: any) {
+		const traceId = this.generateTraceId();
+		
+		// Log ALL incoming messages to catch ghost tools
+		console.log(`[MCP-MESSAGE ${traceId}] Incoming:`, JSON.stringify({
+			method: message.method,
+			params: message.params,
+			id: message.id
+		}));
+
+		// Special logging for tool calls
+		if (message.method === 'tools/call') {
+			console.log(`[GHOST-DETECTOR ${traceId}] Tool call requested:`, {
+				toolName: message.params?.name,
+				toolArgs: message.params?.arguments,
+				allRegisteredTools: Object.keys((this.server as any)._tools || {})
+			});
+			
+			// Check if this tool exists
+			const tools = (this.server as any)._tools || {};
+			const toolExists = message.params?.name && tools[message.params.name];
+			
+			if (!toolExists) {
+				console.error(`[GHOST-TOOL-FOUND ${traceId}] Ghost tool detected! Tool '${message.params?.name}' not in registered tools:`, Object.keys(tools));
+			}
+		}
+
+		// Special logging for tools list to see what Claude receives
+		if (message.method === 'tools/list') {
+			console.log(`[TOOLS-LIST ${traceId}] Claude is requesting tool list`);
+		}
+
+		// Call parent handler
+		try {
+			const result: any = await super.onMessage(message, session);
+			
+			// Log the tools being sent to Claude
+			if (message.method === 'tools/list' && result?.tools) {
+				console.log(`[TOOLS-LIST ${traceId}] Sending ${result.tools.length} tools to Claude:`, 
+					result.tools.map((t: any) => t.name));
+			}
+			
+			console.log(`[MCP-MESSAGE ${traceId}] Response:`, JSON.stringify(result).substring(0, 200));
+			return result;
+		} catch (error) {
+			console.error(`[MCP-MESSAGE ${traceId}] Error:`, error);
+			throw error;
+		}
+	}
+
 	// Wrapper for tool execution with tracing
 	private wrapToolWithTrace(toolName: string, handler: (args: any) => Promise<any>) {
 		return async (args: any) => {
