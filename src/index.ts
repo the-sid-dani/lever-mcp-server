@@ -988,7 +988,8 @@ export class LeverMCP extends McpAgent {
 
 					if (args.owner_id) {
 						// More efficient: Get all postings and filter by owner ID
-						const allPostingsResponse = await this.client.getPostings(args.state, args.limit, undefined, ["owner"]);
+						// Expand both owner and hiringManager to get names
+						const allPostingsResponse = await this.client.getPostings(args.state, args.limit, undefined, ["owner", "hiringManager"]);
 						
 						// Filter by owner ID
 						const filteredPostings = allPostingsResponse.data.filter(posting => {
@@ -1005,6 +1006,7 @@ export class LeverMCP extends McpAgent {
 						};
 					} else {
 						// Fallback: Search by name (less efficient)
+						// The getPostingsByOwner method already expands owner and hiringManager internally
 						response = await this.client.getPostingsByOwner(args.owner_name!, args.state);
 					}
 					

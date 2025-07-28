@@ -1192,7 +1192,8 @@ export function registerAdditionalTools(
 				// Get postings by ID (preferred) or name
 				if (args.owner_id) {
 					// More efficient: Get all postings and filter by owner ID
-					postingsResponse = await client.getPostings("published", 100, undefined, ["owner"]);
+					// Expand both owner and hiringManager to get names
+					postingsResponse = await client.getPostings("published", 100, undefined, ["owner", "hiringManager"]);
 					subrequestCount++;
 					
 					// Filter by owner ID
@@ -1210,6 +1211,7 @@ export function registerAdditionalTools(
 					};
 				} else {
 					// Fallback: Search by name (less efficient)
+					// getPostingsByOwner already expands owner and hiringManager internally
 					postingsResponse = await client.getPostingsByOwner(args.owner_name!);
 					subrequestCount++;
 				}

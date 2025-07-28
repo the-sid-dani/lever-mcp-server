@@ -379,8 +379,8 @@ export class LeverClient {
 
 	// Add method to find postings by owner name
 	async getPostingsByOwner(ownerName: string, state: string = "published"): Promise<LeverApiResponse<LeverPosting>> {
-		// Get all postings with owner data expanded
-		const response = await this.getPostings(state, 100, undefined, ["owner"]);
+		// Get all postings with owner and hiringManager data expanded
+		const response = await this.getPostings(state, 100, undefined, ["owner", "hiringManager"]);
 		
 		// Filter by owner name (case-insensitive partial match)
 		const filteredPostings = response.data.filter(posting => {
