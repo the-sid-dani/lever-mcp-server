@@ -143,6 +143,11 @@ export class LeverMCP {
 			await this.init();
 		});
 	}
+	
+	// Generate a unique session ID
+	private generateSessionId(): string {
+		return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+	}
 
 	async init() {
 		console.log("=== INIT CALLED ===", new Date().toISOString());
@@ -1454,112 +1459,32 @@ export class LeverMCP {
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 		
-		// Handle SSE endpoint
-		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-			console.log("SSE request received");
+		// Handle SSE endpoint - GET request for establishing SSE connection
+		if (url.pathname === "/sse" && request.method === "GET") {
+			console.log("SSE connection request received");
 			
-			// For SSE, we need to handle the message protocol directly
+			// Create SSE stream
 			const { readable, writable } = new TransformStream();
 			const writer = writable.getWriter();
 			const encoder = new TextEncoder();
 			
-			// Handle POST messages (MCP protocol messages)
-			if (request.method === "POST" && url.pathname === "/sse/message") {
-				try {
-					const message = await request.json() as {
-						id?: string | number;
-						method?: string;
-						params?: {
-							name?: string;
-							arguments?: any;
-						};
-					};
-					console.log("Received MCP message:", message);
-					
-					// Handle different message types
-					let response;
-					if (message.method === "tools/list") {
-						// Return the list of available tools
-						const tools = (this.server as any)._registeredTools || new Map();
-						response = {
-							id: message.id,
-							result: {
-								tools: Array.from(tools as Map<string, any>).map(([name, tool]) => ({
-									name,
-									description: tool.description,
-									inputSchema: tool.inputSchema
-								}))
-							}
-						};
-					} else if (message.method === "tools/call") {
-						// Call a specific tool
-						const toolName = message.params?.name;
-						const toolArgs = message.params?.arguments;
-						
-						// Find and execute the tool
-						const tools = (this.server as any)._registeredTools;
-						if (tools && tools.has(toolName)) {
-							const tool = tools.get(toolName);
-							const result = await tool.handler(toolArgs);
-							response = {
-								id: message.id,
-								result
-							};
-						} else {
-							response = {
-								id: message.id,
-								error: {
-									code: -32601,
-									message: `Tool not found: ${toolName}`
-								}
-							};
-						}
-					} else {
-						response = {
-							id: message.id,
-							error: {
-								code: -32601,
-								message: `Method not found: ${message.method}`
-							}
-						};
-					}
-					
-					// Return the response as JSON
-					return new Response(JSON.stringify(response), {
-						headers: { "Content-Type": "application/json" }
-					});
-				} catch (error) {
-					console.error("Error handling message:", error);
-					return new Response(JSON.stringify({
-						error: {
-							code: -32603,
-							message: "Internal error"
-						}
-					}), {
-						status: 500,
-						headers: { "Content-Type": "application/json" }
-					});
-				}
-			}
+			// Send initial endpoint message
+			const sessionId = url.searchParams.get("sessionId") || this.generateSessionId();
+			const endpointMessage = `event: endpoint\ndata: /message?sessionId=${sessionId}\n\n`;
+			writer.write(encoder.encode(endpointMessage));
 			
-			// For GET requests, set up SSE stream
-			const sendMessage = async (data: any) => {
-				const sseMessage = `data: ${JSON.stringify(data)}\n\n`;
-				await writer.write(encoder.encode(sseMessage));
-			};
-			
-			// Send initial connection message
-			sendMessage({ type: "connection", status: "connected" });
-			
-			// Keep connection alive
+			// Keep connection alive with periodic pings
 			const keepAlive = setInterval(() => {
-				sendMessage({ type: "ping" });
+				const ping = `event: ping\ndata: ${Date.now()}\n\n`;
+				writer.write(encoder.encode(ping)).catch(() => {
+					clearInterval(keepAlive);
+				});
 			}, 30000);
 			
 			// Clean up on disconnect
 			request.signal.addEventListener("abort", () => {
 				clearInterval(keepAlive);
-				writer.close();
+				writer.close().catch(() => {});
 			});
 			
 			// Return SSE response
@@ -1568,6 +1493,174 @@ export class LeverMCP {
 					'Content-Type': 'text/event-stream',
 					'Cache-Control': 'no-cache',
 					'Connection': 'keep-alive',
+					'Access-Control-Allow-Origin': '*',
+				},
+			});
+		}
+		
+		// Handle message endpoint - POST requests for MCP messages
+		if (url.pathname === "/message" && request.method === "POST") {
+			try {
+				const sessionId = url.searchParams.get("sessionId");
+				if (!sessionId) {
+					return new Response(JSON.stringify({
+						jsonrpc: "2.0",
+						error: {
+							code: -32600,
+							message: "Session ID required"
+						}
+					}), {
+						status: 400,
+						headers: { 
+							"Content-Type": "application/json",
+							'Access-Control-Allow-Origin': '*',
+						}
+					});
+				}
+				
+				const message = await request.json() as {
+					id?: string | number;
+					method?: string;
+					params?: any;
+					jsonrpc?: string;
+				};
+				
+				console.log("Received MCP message:", message);
+				
+				// Validate JSON-RPC version
+				if (message.jsonrpc !== "2.0") {
+					return new Response(JSON.stringify({
+						jsonrpc: "2.0",
+						id: message.id,
+						error: {
+							code: -32600,
+							message: "Invalid JSON-RPC version"
+						}
+					}), {
+						headers: { 
+							"Content-Type": "application/json",
+							'Access-Control-Allow-Origin': '*',
+						}
+					});
+				}
+				
+				// Handle different message types
+				let response;
+				
+				if (message.method === "initialize") {
+					// Initialize handshake
+					response = {
+						jsonrpc: "2.0",
+						id: message.id,
+						result: {
+							protocolVersion: "2024-11-05",
+							capabilities: {
+								tools: {}
+							},
+							serverInfo: {
+								name: "Lever MCP Server",
+								version: "1.0.0"
+							}
+						}
+					};
+				} else if (message.method === "tools/list") {
+					// Return the list of available tools
+					const tools = (this.server as any)._registeredTools || new Map();
+					response = {
+						jsonrpc: "2.0",
+						id: message.id,
+						result: {
+							tools: Array.from(tools as Map<string, any>).map(([name, tool]) => ({
+								name,
+								description: tool.description || "",
+								inputSchema: tool.inputSchema || {
+									type: "object",
+									properties: {},
+									required: []
+								}
+							}))
+						}
+					};
+				} else if (message.method === "tools/call") {
+					// Call a specific tool
+					const toolName = message.params?.name;
+					const toolArgs = message.params?.arguments || {};
+					
+					// Find and execute the tool
+					const tools = (this.server as any)._registeredTools;
+					if (tools && tools.has(toolName)) {
+						try {
+							const tool = tools.get(toolName);
+							const result = await tool.handler(toolArgs);
+							response = {
+								jsonrpc: "2.0",
+								id: message.id,
+								result
+							};
+						} catch (error) {
+							console.error(`Error executing tool ${toolName}:`, error);
+							response = {
+								jsonrpc: "2.0",
+								id: message.id,
+								error: {
+									code: -32603,
+									message: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`
+								}
+							};
+						}
+					} else {
+						response = {
+							jsonrpc: "2.0",
+							id: message.id,
+							error: {
+								code: -32601,
+								message: `Tool not found: ${toolName}`
+							}
+						};
+					}
+				} else {
+					response = {
+						jsonrpc: "2.0",
+						id: message.id,
+						error: {
+							code: -32601,
+							message: `Method not found: ${message.method}`
+						}
+					};
+				}
+				
+				// Return the response
+				return new Response(JSON.stringify(response), {
+					headers: { 
+						"Content-Type": "application/json",
+						'Access-Control-Allow-Origin': '*',
+					}
+				});
+			} catch (error) {
+				console.error("Error handling message:", error);
+				return new Response(JSON.stringify({
+					jsonrpc: "2.0",
+					error: {
+						code: -32603,
+						message: "Internal error"
+					}
+				}), {
+					status: 500,
+					headers: { 
+						"Content-Type": "application/json",
+						'Access-Control-Allow-Origin': '*',
+					}
+				});
+			}
+		}
+		
+		// Handle OPTIONS requests for CORS
+		if (request.method === "OPTIONS") {
+			return new Response(null, {
+				headers: {
+					'Access-Control-Allow-Origin': '*',
+					'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+					'Access-Control-Allow-Headers': 'Content-Type',
 				},
 			});
 		}
