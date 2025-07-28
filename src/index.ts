@@ -1,3 +1,4 @@
+import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LeverClient } from "./lever/client";
@@ -7,7 +8,6 @@ import { registerAdditionalTools } from "./additional-tools";
 // Environment interface
 interface Env {
 	LEVER_API_KEY: string;
-	MCP_OBJECT: DurableObjectNamespace;
 }
 
 // Helper to format opportunity data
@@ -116,45 +116,17 @@ function formatPosting(posting: LeverPosting): Record<string, any> {
 	};
 }
 
-// Define our Lever MCP server
-export class LeverMCP {
-	private server: McpServer;
+// Define our Lever MCP agent
+export class LeverMCP extends McpAgent {
+	server = new McpServer({
+		name: "Lever ATS",
+		version: "1.0.0",
+	});
+
 	private client!: LeverClient;
 	private toolsRegistered = false; // Guard against double registration
-	private state: DurableObjectState;
-	private env: Env;
-
-	constructor(state: DurableObjectState, env: Env) {
-		this.state = state;
-		this.env = env;
-		
-		console.log("LeverMCP constructor called");
-		
-		// Initialize MCP server
-		this.server = new McpServer({
-			name: "Lever ATS",
-			version: "1.0.0",
-		}, {
-			capabilities: {
-				tools: {}
-			}
-		});
-		
-		// Initialize immediately
-		this.init().catch(error => {
-			console.error("Failed to initialize LeverMCP:", error);
-		});
-	}
-	
-	// Generate a unique session ID
-	private generateSessionId(): string {
-		return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-	}
 
 	async init() {
-		console.log("=== INIT CALLED ===", new Date().toISOString());
-		console.log("Init call stack:", new Error().stack?.split('\n').slice(1, 5).join('\n'));
-		
 		// Check if tools are already registered
 		if (this.toolsRegistered) {
 			console.warn("⚠️ TOOLS ALREADY REGISTERED - SKIPPING REGISTRATION TO PREVENT GHOSTS");
@@ -180,31 +152,6 @@ export class LeverMCP {
 		// Mark tools as registered
 		this.toolsRegistered = true;
 		console.log("✅ Tools registered successfully");
-		
-		// Log all registered tools to help debug ghost tools
-		console.log("=== LEVER MCP: All registered tools ===");
-		const tools = (this.server as any)._tools || (this.server as any).tools || (this.server as any)._registeredTools || [];
-		console.log("Tools object type:", typeof tools);
-		console.log("Tools object:", tools);
-		
-		if (tools instanceof Map) {
-			console.log("Tools is a Map with", tools.size, "entries");
-			tools.forEach((tool, name) => {
-				console.log(`- ${name}`);
-			});
-		} else if (Array.isArray(tools)) {
-			console.log("Tools is an array with", tools.length, "entries");
-			tools.forEach((tool: any) => {
-				console.log(`- ${tool.name || tool}`);
-			});
-		} else if (typeof tools === 'object') {
-			const keys = Object.keys(tools);
-			console.log("Tools is an object with", keys.length, "keys");
-			keys.forEach(toolName => {
-				console.log(`- ${toolName}`);
-			});
-		}
-		console.log("=== End of registered tools ===");
 	}
 
 	private registerSearchTools() {
@@ -1467,289 +1414,58 @@ export class LeverMCP {
 			},
 		);
 	}
+}
 
-	// Handle incoming requests
-	async fetch(request: Request): Promise<Response> {
+export default {
+	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
-		
-		// Handle SSE endpoint - GET request for establishing SSE connection
-		if (url.pathname === "/sse" && request.method === "GET") {
-			console.log("SSE connection request received");
-			
-			// Create SSE stream
-			const { readable, writable } = new TransformStream();
-			const writer = writable.getWriter();
-			const encoder = new TextEncoder();
-			
-			// Send initial endpoint message
-			const sessionId = url.searchParams.get("sessionId") || this.generateSessionId();
-			const endpointMessage = `event: endpoint\ndata: /message?sessionId=${sessionId}\n\n`;
-			writer.write(encoder.encode(endpointMessage));
-			
-			// Keep connection alive with periodic pings
-			const keepAlive = setInterval(() => {
-				const ping = `event: ping\ndata: ${Date.now()}\n\n`;
-				writer.write(encoder.encode(ping)).catch(() => {
-					clearInterval(keepAlive);
-				});
-			}, 30000);
-			
-			// Clean up on disconnect
-			request.signal.addEventListener("abort", () => {
-				clearInterval(keepAlive);
-				writer.close().catch(() => {});
-			});
-			
-			// Return SSE response
-			return new Response(readable, {
-				headers: {
-					'Content-Type': 'text/event-stream',
-					'Cache-Control': 'no-cache',
-					'Connection': 'keep-alive',
-					'Access-Control-Allow-Origin': '*',
-				},
-			});
+
+		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
+			return LeverMCP.serveSSE("/sse").fetch(request, env, ctx);
 		}
-		
-		// Handle message endpoint - POST requests for MCP messages
-		if (url.pathname === "/message" && request.method === "POST") {
-			try {
-				const sessionId = url.searchParams.get("sessionId");
-				if (!sessionId) {
-					return new Response(JSON.stringify({
-						jsonrpc: "2.0",
-						error: {
-							code: -32600,
-							message: "Session ID required"
-						}
-					}), {
-						status: 400,
-						headers: { 
-							"Content-Type": "application/json",
-							'Access-Control-Allow-Origin': '*',
-						}
-					});
-				}
-				
-				const message = await request.json() as {
-					id?: string | number;
-					method?: string;
-					params?: any;
-					jsonrpc?: string;
-				};
-				
-				console.log("Received MCP message:", message);
-				
-				// Validate JSON-RPC version
-				if (message.jsonrpc !== "2.0") {
-					return new Response(JSON.stringify({
-						jsonrpc: "2.0",
-						id: message.id,
-						error: {
-							code: -32600,
-							message: "Invalid JSON-RPC version"
-						}
-					}), {
-						headers: { 
-							"Content-Type": "application/json",
-							'Access-Control-Allow-Origin': '*',
-						}
-					});
-				}
-				
-				// Handle different message types
-				let response;
-				
-				if (message.method === "initialize") {
-					// Initialize handshake
-					const clientProtocolVersion = message.params?.protocolVersion;
-					console.log("Client protocol version:", clientProtocolVersion);
-					
-					// Support multiple protocol versions
-					const supportedVersions = ["2024-11-05", "2025-06-18"];
-					const protocolVersion = supportedVersions.includes(clientProtocolVersion) 
-						? clientProtocolVersion 
-						: "2024-11-05";
-					
-					response = {
-						jsonrpc: "2.0",
-						id: message.id,
-						result: {
-							protocolVersion,
-							capabilities: {
-								tools: {}
-							},
-							serverInfo: {
-								name: "Lever MCP Server",
-								version: "1.0.0"
-							}
-						}
-					};
-				} else if (message.method === "tools/list") {
-					// Return the list of available tools
-					console.log("Tools list requested");
-					
-					// Try different ways to get the tools
-					const tools = (this.server as any)._tools || 
-								 (this.server as any).tools || 
-								 (this.server as any)._registeredTools || 
-								 (this.server as any).registeredTools ||
-								 new Map();
-					
-					console.log("Found tools object:", tools);
-					console.log("Tools type:", typeof tools, tools instanceof Map ? "Map" : "Not Map");
-					
-					let toolsList: Array<{
-						name: string;
-						description: string;
-						inputSchema: any;
-					}> = [];
-					
-					if (tools instanceof Map) {
-						toolsList = Array.from(tools).map(([name, tool]) => ({
-							name,
-							description: (tool as any).description || "",
-							inputSchema: (tool as any).inputSchema || {
-								type: "object",
-								properties: {},
-								required: []
-							}
-						}));
-					} else if (Array.isArray(tools)) {
-						toolsList = tools.map((tool: any) => ({
-							name: tool.name || "",
-							description: tool.description || "",
-							inputSchema: tool.inputSchema || {
-								type: "object",
-								properties: {},
-								required: []
-							}
-						}));
-					}
-					
-					console.log("Returning tools list with", toolsList.length, "tools");
-					
-					response = {
-						jsonrpc: "2.0",
-						id: message.id,
-						result: {
-							tools: toolsList
-						}
-					};
-				} else if (message.method === "tools/call") {
-					// Call a specific tool
-					const toolName = message.params?.name;
-					const toolArgs = message.params?.arguments || {};
-					
-					// Find and execute the tool
-					const tools = (this.server as any)._registeredTools;
-					if (tools && tools.has(toolName)) {
-						try {
-							const tool = tools.get(toolName);
-							const result = await tool.handler(toolArgs);
-							response = {
-								jsonrpc: "2.0",
-								id: message.id,
-								result
-							};
-						} catch (error) {
-							console.error(`Error executing tool ${toolName}:`, error);
-							response = {
-								jsonrpc: "2.0",
-								id: message.id,
-								error: {
-									code: -32603,
-									message: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`
-								}
-							};
-						}
-					} else {
-						response = {
-							jsonrpc: "2.0",
-							id: message.id,
-							error: {
-								code: -32601,
-								message: `Tool not found: ${toolName}`
-							}
-						};
-					}
-				} else {
-					response = {
-						jsonrpc: "2.0",
-						id: message.id,
-						error: {
-							code: -32601,
-							message: `Method not found: ${message.method}`
-						}
-					};
-				}
-				
-				// Return the response
-				return new Response(JSON.stringify(response), {
-					headers: { 
-						"Content-Type": "application/json",
-						'Access-Control-Allow-Origin': '*',
-					}
-				});
-			} catch (error) {
-				console.error("Error handling message:", error);
-				return new Response(JSON.stringify({
-					jsonrpc: "2.0",
-					error: {
-						code: -32603,
-						message: "Internal error"
-					}
-				}), {
-					status: 500,
-					headers: { 
-						"Content-Type": "application/json",
-						'Access-Control-Allow-Origin': '*',
-					}
-				});
-			}
+
+		if (url.pathname === "/mcp") {
+			return LeverMCP.serve("/mcp").fetch(request, env, ctx);
 		}
-		
-		// Handle OPTIONS requests for CORS
-		if (request.method === "OPTIONS") {
-			return new Response(null, {
-				headers: {
-					'Access-Control-Allow-Origin': '*',
-					'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-					'Access-Control-Allow-Headers': 'Content-Type',
-				},
-			});
-		}
-		
+
 		// Health check
 		if (url.pathname === "/health") {
 			return new Response("OK", { status: 200 });
 		}
-		
-		// Default response
-		return new Response(
-			JSON.stringify({
-				name: "Lever MCP Server",
-				description: "Remote MCP server for Lever ATS integration",
-				version: "1.0.0",
-				endpoints: {
-					sse: "/sse",
-					health: "/health",
-				},
-				note: "This server uses Server-Sent Events (SSE) for communication"
-			}, null, 2),
-			{
-				status: 200,
-				headers: { "Content-Type": "application/json" }
-			}
-		);
-	}
-}
 
-export default {
-	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-		// All requests go through the Durable Object
-		const id = env.MCP_OBJECT.idFromName("main");
-		const stub = env.MCP_OBJECT.get(id);
-		return stub.fetch(request);
-	}
+		// Default response with instructions
+		return new Response(
+			JSON.stringify(
+				{
+					name: "Lever MCP Server",
+					description: "Remote MCP server for Lever ATS integration",
+					version: "1.0.0",
+					endpoints: {
+						sse: "/sse",
+						mcp: "/mcp",
+						health: "/health",
+					},
+					instructions: {
+						claude:
+							"Use: npx mcp-remote " +
+							request.url.split("/")[0] +
+							"//" +
+							request.headers.get("host") +
+							"/sse",
+						inspector:
+							"Connect to: " +
+							request.url.split("/")[0] +
+							"//" +
+							request.headers.get("host") +
+							"/sse",
+					},
+				},
+				null,
+				2,
+			),
+			{
+				headers: { "Content-Type": "application/json" },
+			},
+		);
+	},
 };
