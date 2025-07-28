@@ -77,6 +77,10 @@ export class LeverClient {
 				});
 			}
 
+			const traceId = `api-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+			console.log(`[API-TRACE ${traceId}] START ${method} ${endpoint}`);
+			const startTime = Date.now();
+
 			try {
 				const response = await fetch(url.toString(), {
 					method,
@@ -86,6 +90,9 @@ export class LeverClient {
 					},
 					body: body ? JSON.stringify(body) : undefined,
 				});
+
+				const duration = Date.now() - startTime;
+				console.log(`[API-TRACE ${traceId}] Response: ${response.status} | Duration: ${duration}ms | Attempt: ${retryCount + 1}`);
 
 				if (!response.ok) {
 					const errorText = await response.text();
@@ -130,6 +137,7 @@ export class LeverClient {
 					console.warn(`Empty response from Lever API for ${endpoint}`);
 				}
 				
+				console.log(`[API-TRACE ${traceId}] SUCCESS | Total duration: ${Date.now() - startTime}ms`);
 				return responseData;
 			} catch (error) {
 				// Retry on network errors

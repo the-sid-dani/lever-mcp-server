@@ -125,33 +125,105 @@ export class LeverMCP extends McpAgent {
 
 	private client!: LeverClient;
 	private toolsRegistered = false; // Guard against double registration
+	private requestId = 0; // For tracing
+
+	// Generate a unique trace ID for each request
+	private generateTraceId(): string {
+		this.requestId++;
+		return `${Date.now()}-${this.requestId}-${Math.random().toString(36).substring(7)}`;
+	}
+
+	// Log with trace context
+	private trace(traceId: string, message: string, data?: any) {
+		const timestamp = new Date().toISOString();
+		console.log(`[TRACE ${traceId}] [${timestamp}] ${message}`, data ? JSON.stringify(data) : '');
+	}
+
+	// Wrapper for tool execution with tracing
+	private wrapToolWithTrace(toolName: string, handler: (args: any) => Promise<any>) {
+		return async (args: any) => {
+			const traceId = this.generateTraceId();
+			const startTime = Date.now();
+			
+			this.trace(traceId, "TOOL_START", { 
+				tool: toolName, 
+				args: JSON.stringify(args).substring(0, 200) // Limit arg logging
+			});
+			
+			try {
+				const result = await handler(args);
+				const duration = Date.now() - startTime;
+				
+				this.trace(traceId, "TOOL_SUCCESS", { 
+					tool: toolName, 
+					duration_ms: duration,
+					result_preview: JSON.stringify(result).substring(0, 100)
+				});
+				
+				return result;
+			} catch (error) {
+				const duration = Date.now() - startTime;
+				
+				this.trace(traceId, "TOOL_ERROR", { 
+					tool: toolName, 
+					duration_ms: duration,
+					error: error instanceof Error ? error.message : String(error),
+					stack: error instanceof Error ? error.stack : undefined
+				});
+				
+				throw error;
+			}
+		};
+	}
 
 	async init() {
+		const traceId = this.generateTraceId();
+		this.trace(traceId, "INIT_START", { toolsRegistered: this.toolsRegistered });
+		
 		// Check if tools are already registered
 		if (this.toolsRegistered) {
 			console.warn("⚠️ TOOLS ALREADY REGISTERED - SKIPPING REGISTRATION TO PREVENT GHOSTS");
+			this.trace(traceId, "INIT_SKIPPED", { reason: "tools_already_registered" });
 			return;
 		}
 		
-		// Initialize Lever client with API key from environment
-		const env = this.env as Env;
-		const apiKey = env.LEVER_API_KEY;
-		if (!apiKey) {
-			throw new Error("LEVER_API_KEY environment variable is required");
+		try {
+			// Initialize Lever client with API key from environment
+			const env = this.env as Env;
+			const apiKey = env.LEVER_API_KEY;
+			if (!apiKey) {
+				this.trace(traceId, "INIT_ERROR", { error: "LEVER_API_KEY not found" });
+				throw new Error("LEVER_API_KEY environment variable is required");
+			}
+			this.trace(traceId, "INIT_CLIENT", { hasApiKey: true });
+			this.client = new LeverClient(apiKey);
+
+			// Register all Lever tools
+			this.trace(traceId, "REGISTER_TOOLS_START");
+			this.registerSearchTools();
+			this.trace(traceId, "REGISTER_TOOLS", { phase: "search_tools_complete" });
+			
+			this.registerCandidateTools();
+			this.trace(traceId, "REGISTER_TOOLS", { phase: "candidate_tools_complete" });
+			
+			this.registerUtilityTools();
+			this.trace(traceId, "REGISTER_TOOLS", { phase: "utility_tools_complete" });
+
+			// Register additional tools to complete the set of 16
+			registerAdditionalTools(this.server, this.client);
+			this.trace(traceId, "REGISTER_TOOLS", { phase: "additional_tools_complete" });
+			
+			// Mark tools as registered
+			this.toolsRegistered = true;
+			console.log("✅ Tools registered successfully");
+			this.trace(traceId, "INIT_COMPLETE", { success: true });
+		} catch (error) {
+			this.trace(traceId, "INIT_ERROR", { 
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined
+			});
+			throw error;
 		}
-		this.client = new LeverClient(apiKey);
-
-		// Register all Lever tools
-		this.registerSearchTools();
-		this.registerCandidateTools();
-		this.registerUtilityTools();
-
-		// Register additional tools to complete the set of 16
-		registerAdditionalTools(this.server, this.client);
-		
-		// Mark tools as registered
-		this.toolsRegistered = true;
-		console.log("✅ Tools registered successfully");
 	}
 
 	private registerSearchTools() {
@@ -168,20 +240,20 @@ export class LeverMCP extends McpAgent {
 				limit: z.number().default(50).describe("Results per page (recommended: 20-50 for broad searches)"),
 				page: z.number().default(1).describe("Page number (1-based)"),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("lever_advanced_search", async (args) => {
 				try {
 					// Parse search criteria
 					const companyList = args.companies
-						? args.companies.split(",").map((c) => c.trim().toLowerCase())
+						? args.companies.split(",").map((c: string) => c.trim().toLowerCase())
 						: [];
 					const skillList = args.skills
-						? args.skills.split(",").map((s) => s.trim().toLowerCase())
+						? args.skills.split(",").map((s: string) => s.trim().toLowerCase())
 						: [];
 					const locationList = args.locations
-						? args.locations.split(",").map((l) => l.trim().toLowerCase())
+						? args.locations.split(",").map((l: string) => l.trim().toLowerCase())
 						: [];
 					const tagList = args.tags
-						? args.tags.split(",").map((t) => t.trim().toLowerCase())
+						? args.tags.split(",").map((t: string) => t.trim().toLowerCase())
 						: [];
 
 					const allCandidates: LeverOpportunity[] = [];
@@ -308,15 +380,15 @@ export class LeverMCP extends McpAgent {
 							const companyMatch =
 								!companyList.length ||
 								companyList.some(
-									(comp) =>
+									(comp: string) =>
 										cHeadline.includes(comp) ||
-										cOrganizationsLower.some((org) => org.includes(comp)),
+										cOrganizationsLower.some((org: string) => org.includes(comp)),
 								);
 
 							// Skills match: ANY skill match (OR logic)
 							const skillMatch =
 								!skillList.length ||
-								skillList.some((skill) => cAllText.includes(skill));
+								skillList.some((skill: string) => cAllText.includes(skill));
 
 							// Location match: ANY location match (handle UK variations)
 							const ukVariations = [
@@ -352,7 +424,7 @@ export class LeverMCP extends McpAgent {
 							// Tag match: ANY tag match
 							const tagMatch =
 								!tagList.length ||
-								tagList.some((tag) => cTagsLower.includes(tag));
+								tagList.some((tag: string) => cTagsLower.includes(tag));
 
 							return companyMatch && skillMatch && locationMatch && tagMatch;
 						});
@@ -469,7 +541,7 @@ export class LeverMCP extends McpAgent {
 						],
 					};
 				}
-			},
+			}),
 		);
 
 		// Find by company tool
@@ -481,10 +553,10 @@ export class LeverMCP extends McpAgent {
 				limit: z.number().default(200),
 				page: z.number().default(1).describe("Page number (1-based)"),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("lever_find_by_company", async (args) => {
 				try {
 					// Parse company list
-					const companyList = args.companies.split(",").map((c) => c.trim());
+					const companyList = args.companies.split(",").map((c: string) => c.trim());
 
 					// Search for candidates from each company
 					const allCandidates: any[] = [];
@@ -612,7 +684,7 @@ export class LeverMCP extends McpAgent {
 						],
 					};
 				}
-			},
+			}),
 		);
 	}
 
@@ -623,7 +695,7 @@ export class LeverMCP extends McpAgent {
 			{
 				opportunity_id: z.string(),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("lever_get_candidate", async (args) => {
 				try {
 					console.log(`Fetching candidate ${args.opportunity_id}`);
 					const response = await this.client.getOpportunity(
@@ -741,7 +813,7 @@ export class LeverMCP extends McpAgent {
 						],
 					};
 				}
-			},
+			}),
 		);
 
 		// Add note to candidate
@@ -751,7 +823,7 @@ export class LeverMCP extends McpAgent {
 				opportunity_id: z.string(),
 				note: z.string(),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("lever_add_note", async (args) => {
 				await this.client.addNote(args.opportunity_id, args.note);
 				return {
 					content: [
@@ -761,7 +833,7 @@ export class LeverMCP extends McpAgent {
 						},
 					],
 				};
-			},
+			}),
 		);
 	}
 
@@ -769,7 +841,7 @@ export class LeverMCP extends McpAgent {
 		// List open roles
 		this.server.tool("lever_list_open_roles", {
 			expand_owners: z.boolean().default(true).describe("Include posting owner and hiring manager details"),
-		}, async (args) => {
+		}, this.wrapToolWithTrace("lever_list_open_roles", async (args) => {
 			try {
 				// Get postings with owner data if requested
 				const expandFields = args.expand_owners ? ["owner", "hiringManager"] : [];
@@ -807,10 +879,10 @@ export class LeverMCP extends McpAgent {
 					],
 				};
 			}
-		});
+		}));
 
 		// Get stages
-		this.server.tool("lever_get_stages", {}, async () => {
+		this.server.tool("lever_get_stages", {}, this.wrapToolWithTrace("lever_get_stages", async () => {
 			const stages = await this.client.getStages();
 			return {
 				content: [
@@ -820,10 +892,10 @@ export class LeverMCP extends McpAgent {
 					},
 				],
 			};
-		});
+		}));
 
 		// Get archive reasons
-		this.server.tool("lever_get_archive_reasons", {}, async () => {
+		this.server.tool("lever_get_archive_reasons", {}, this.wrapToolWithTrace("lever_get_archive_reasons", async () => {
 			const reasons = await this.client.getArchiveReasons();
 			return {
 				content: [
@@ -833,7 +905,7 @@ export class LeverMCP extends McpAgent {
 					},
 				],
 			};
-		});
+		}));
 
 		// Find postings by owner/recruiter name or ID
 		this.server.tool(
@@ -844,7 +916,7 @@ export class LeverMCP extends McpAgent {
 				state: z.enum(["published", "closed", "draft", "pending", "rejected"]).default("published"),
 				limit: z.number().default(50),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("lever_find_postings_by_owner", async (args) => {
 				try {
 					// Validate input
 					if (!args.owner_name && !args.owner_id) {
@@ -912,11 +984,11 @@ export class LeverMCP extends McpAgent {
 						],
 					};
 				}
-			},
+			}),
 		);
 
 		// Test connection tool
-		this.server.tool("test_lever_connection", {}, async () => {
+		this.server.tool("test_lever_connection", {}, this.wrapToolWithTrace("test_lever_connection", async () => {
 			try {
 				console.log("Testing Lever API connection...");
 				
@@ -960,7 +1032,7 @@ export class LeverMCP extends McpAgent {
 					],
 				};
 			}
-		});
+		}));
 
 		// Test rate limits tool - verify our rate limiting is working
 		this.server.tool(
@@ -969,7 +1041,7 @@ export class LeverMCP extends McpAgent {
 				requests: z.number().default(20).describe("Number of test requests to make"),
 				concurrent: z.boolean().default(false).describe("Run requests concurrently instead of sequentially"),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("test_rate_limits", async (args) => {
 				const results: any[] = [];
 				const startTime = Date.now();
 				
@@ -1067,7 +1139,7 @@ export class LeverMCP extends McpAgent {
 						},
 					],
 				};
-			},
+			}),
 		);
 
 		// Verify API response tool - check what the API actually returns
@@ -1076,7 +1148,7 @@ export class LeverMCP extends McpAgent {
 			{
 				batches: z.number().default(3).describe("Number of API batches to fetch (max 5)"),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("verify_api_response", async (args) => {
 				const results: any[] = [];
 				let offset: string | undefined;
 				const batchCount = Math.min(args.batches, 5); // Limit to 5 batches
@@ -1132,7 +1204,7 @@ export class LeverMCP extends McpAgent {
 						},
 					],
 				};
-			},
+			}),
 		);
 
 		// Debug get candidate - returns raw response
@@ -1141,7 +1213,7 @@ export class LeverMCP extends McpAgent {
 			{
 				opportunity_id: z.string(),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("debug_get_candidate", async (args) => {
 				try {
 					console.log(`DEBUG: Fetching raw data for candidate ${args.opportunity_id}`);
 					
@@ -1187,14 +1259,14 @@ export class LeverMCP extends McpAgent {
 						],
 					};
 				}
-			},
+			}),
 		);
 
 		// Debug postings - returns raw structure
 		this.server.tool(
 			"debug_postings",
 			{},
-			async () => {
+			this.wrapToolWithTrace("debug_postings", async () => {
 				try {
 					console.log(`DEBUG: Fetching raw postings data`);
 					
@@ -1247,7 +1319,7 @@ export class LeverMCP extends McpAgent {
 						],
 					};
 				}
-			},
+			}),
 		);
 
 		// Debug opportunities list - check what's coming back
@@ -1257,7 +1329,7 @@ export class LeverMCP extends McpAgent {
 				name_search: z.string().optional(),
 				limit: z.number().default(5),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("debug_opportunities_list", async (args) => {
 				try {
 					console.log(`DEBUG: Fetching opportunities list`);
 					
@@ -1327,7 +1399,7 @@ export class LeverMCP extends McpAgent {
 						],
 					};
 				}
-			},
+			}),
 		);
 
 		// Find candidates for role
@@ -1338,7 +1410,7 @@ export class LeverMCP extends McpAgent {
 				limit: z.number().default(200),
 				page: z.number().default(1).describe("Page number (1-based)"),
 			},
-			async (args) => {
+			this.wrapToolWithTrace("lever_find_candidates_for_role", async (args) => {
 				try {
 					const allCandidates: LeverOpportunity[] = [];
 					let offset: string | undefined;
@@ -1411,7 +1483,7 @@ export class LeverMCP extends McpAgent {
 						],
 					};
 				}
-			},
+			}),
 		);
 	}
 }
@@ -1419,21 +1491,34 @@ export class LeverMCP extends McpAgent {
 export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
+		
+		// Add Cloudflare trace headers
+		const cfRay = request.headers.get('CF-Ray') || 'unknown';
+		const cfCountry = request.headers.get('CF-IPCountry') || 'unknown';
+		const traceId = `${cfRay}-${Date.now()}`;
+		
+		console.log(`[CF-TRACE] Request: ${request.method} ${url.pathname} | Ray: ${cfRay} | Country: ${cfCountry} | TraceID: ${traceId}`);
 
 		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-			return LeverMCP.serveSSE("/sse").fetch(request, env, ctx);
+			const result = LeverMCP.serveSSE("/sse").fetch(request, env, ctx);
+			console.log(`[CF-TRACE] SSE handled | TraceID: ${traceId}`);
+			return result;
 		}
 
 		if (url.pathname === "/mcp") {
-			return LeverMCP.serve("/mcp").fetch(request, env, ctx);
+			const result = LeverMCP.serve("/mcp").fetch(request, env, ctx);
+			console.log(`[CF-TRACE] MCP handled | TraceID: ${traceId}`);
+			return result;
 		}
 
 		// Health check
 		if (url.pathname === "/health") {
+			console.log(`[CF-TRACE] Health check | TraceID: ${traceId}`);
 			return new Response("OK", { status: 200 });
 		}
 
 		// Default response with instructions
+		console.log(`[CF-TRACE] Default response | TraceID: ${traceId}`);
 		return new Response(
 			JSON.stringify(
 				{
