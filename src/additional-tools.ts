@@ -1188,7 +1188,7 @@ export function registerAdditionalTools(
 				// Performance tracking
 				const startTime = Date.now();
 				let postingsResponse;
-				let subrequestCount = 0; // Track API calls to stay under 50
+				let subrequestCount = 0; // Track API calls to stay under 1000 (paid plan)
 
 				// Get stage mapping to convert IDs to names
 				let stageMap: Record<string, string> = {};
@@ -1211,10 +1211,10 @@ export function registerAdditionalTools(
 					const allPostings: any[] = [];
 					let offset: string | undefined;
 					let batchesFetched = 0;
-					const maxBatches = 5; // Fetch up to 500 postings (5 batches of 100)
+					const maxBatches = 20; // Fetch up to 2000 postings (20 batches of 100)
 					
 					// Fetch multiple batches to increase coverage
-					while (batchesFetched < maxBatches && subrequestCount < 40) {
+					while (batchesFetched < maxBatches && subrequestCount < 900) {
 						const batchResponse = await client.getPostings("published", 100, offset, ["owner", "hiringManager"]);
 						subrequestCount++;
 						
@@ -1292,7 +1292,7 @@ export function registerAdditionalTools(
 				// Process each posting on current page
 				for (const posting of paginatedPostings) {
 					// Stop if we're getting close to the limit
-					if (subrequestCount >= 40) {
+					if (subrequestCount >= 900) {
 						console.warn(`Stopping early to avoid subrequest limit. Processed ${postingSummaries.length} postings.`);
 						break;
 					}
@@ -1305,7 +1305,7 @@ export function registerAdditionalTools(
 					// If we want ALL candidates (-1) or need accurate counts, fetch all
 					if (candidateLimit === -1 || args.focus_interviews_only || !args.summary_mode) {
 						// Fetch ALL candidates for this posting in batches
-						while (subrequestCount < 40) {
+						while (subrequestCount < 900) {
 							const batchResponse = await client.getOpportunities({
 								posting_id: posting.id,
 								stage_id: args.stage_filter,
@@ -1377,12 +1377,12 @@ export function registerAdditionalTools(
 					// Interview tracking
 					let candidatesWithInterviews: any[] = [];
 					
-					if (args.include_interviews && subrequestCount < 40) {
+					if (args.include_interviews && subrequestCount < 900) {
 						// For interview focus mode, check ALL candidates
 						const candidatesToCheck = args.focus_interviews_only ? candidates : candidates.slice(0, 20);
 						
 						for (const candidate of candidatesToCheck) {
-							if (subrequestCount >= 45) break;
+							if (subrequestCount >= 900) break;
 							
 							try {
 								const interviews = await client.getOpportunityInterviews(candidate.id);
@@ -1497,8 +1497,8 @@ export function registerAdditionalTools(
 					
 					// Performance metrics
 					performance: {
-						api_calls_used: subrequestCount,
-						subrequest_limit_reached: subrequestCount >= 45,
+											api_calls_used: subrequestCount,
+					subrequest_limit_reached: subrequestCount >= 900,
 						used_owner_id: !!args.owner_id,
 					},
 					

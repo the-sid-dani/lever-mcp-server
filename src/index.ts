@@ -309,10 +309,10 @@ export class LeverMCP extends McpAgent {
 
 					const allCandidates: LeverOpportunity[] = [];
 					let offset: string | undefined;
-					// Reduce maxFetch to stay within Cloudflare's free plan 50 subrequest limit
+					// Updated for Cloudflare's paid plan with 1000 subrequest limit
 					// Each API call counts as a subrequest, and we fetch 100 candidates per call
-					// So we can make at most 45 API calls (leaving 5 for other operations)
-					const maxFetch = Math.min(args.limit * 10, 1000, 4500); // Max 4500 candidates = 45 API calls
+					// We can make up to 900 API calls (leaving 100 for other operations)
+					const maxFetch = Math.min(args.limit * 10, 10000, 90000); // Max 90,000 candidates = 900 API calls
 					let totalMatches = 0; // Track total matches for pagination info
 					let totalScanned = 0; // Track how many candidates we've looked at
 					let totalFetched = 0; // Track how many candidates we fetched from API
@@ -323,7 +323,7 @@ export class LeverMCP extends McpAgent {
 					let apiCallCount = 0; // Track API calls to prevent hitting subrequest limit
 
 					// Fetch candidates with pagination
-					while (allCandidates.length < maxFetch && apiCallCount < 45) { // Limit to 45 API calls
+					while (allCandidates.length < maxFetch && apiCallCount < 900) { // Limit to 900 API calls
 						// Check for timeout BEFORE processing
 						if (Date.now() - startTime > maxExecutionTime) {
 							console.warn(`Timeout before processing batch ${apiCallCount}`);
@@ -540,9 +540,9 @@ export class LeverMCP extends McpAgent {
 					};
 
 					// Add warning if search was incomplete
-					if (wasTimeout || allCandidates.length >= maxFetch || apiCallCount >= 45) {
-						if (apiCallCount >= 45) {
-							searchResult.warning = `Search limited by Cloudflare Workers free plan (50 subrequest limit). Scanned ${totalScanned} candidates and found ${allCandidates.length} matches. Consider upgrading to Workers Paid plan for deeper searches.`;
+					if (wasTimeout || allCandidates.length >= maxFetch || apiCallCount >= 900) {
+						if (apiCallCount >= 900) {
+							searchResult.warning = `Search reached Cloudflare Workers subrequest limit (1000 total). Scanned ${totalScanned} candidates and found ${allCandidates.length} matches. This is an extremely comprehensive search covering up to 90,000 candidates.`;
 						} else if (wasTimeout) {
 							searchResult.warning = `Search stopped after scanning ${totalScanned} candidates (${Math.round(executionTime / 1000)}s). Found ${allCandidates.length} matches. More candidates may exist beyond this point.`;
 						} else {
