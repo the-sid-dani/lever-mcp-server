@@ -379,44 +379,16 @@ export class LeverClient {
 
 	// Add method to find postings by owner name
 	async getPostingsByOwner(ownerName: string, state: string = "published"): Promise<LeverApiResponse<LeverPosting>> {
-		// Fetch ALL postings to ensure we don't miss any
-		const allPostings: LeverPosting[] = [];
-		let offset: string | undefined;
-		let hasMore = true;
-		
-		// Keep fetching until we have all postings
-		while (hasMore) {
-			const response = await this.getPostings(state, 100, offset, ["owner", "hiringManager"]);
-			
-			if (response.data && response.data.length > 0) {
-				allPostings.push(...response.data);
-			}
-			
-			hasMore = response.hasNext || false;
-			offset = response.next;
-			
-			// Safety limit to prevent infinite loops
-			if (allPostings.length > 1000) {
-				console.warn("Reached 1000 postings limit in getPostingsByOwner");
-				break;
-			}
-		}
-		
-		console.log(`getPostingsByOwner: Fetched ${allPostings.length} total postings, searching for owner: ${ownerName}`);
+		// Get all postings with owner and hiringManager data expanded
+		const response = await this.getPostings(state, 100, undefined, ["owner", "hiringManager"]);
 		
 		// Filter by owner name (case-insensitive partial match)
-		const filteredPostings = allPostings.filter(posting => {
+		const filteredPostings = response.data.filter(posting => {
 			if (typeof posting.owner === "object" && posting.owner?.name) {
-				const match = posting.owner.name.toLowerCase().includes(ownerName.toLowerCase());
-				if (match) {
-					console.log(`Found match: ${posting.owner.name} for posting: ${posting.text}`);
-				}
-				return match;
+				return posting.owner.name.toLowerCase().includes(ownerName.toLowerCase());
 			}
 			return false;
 		});
-		
-		console.log(`getPostingsByOwner: Found ${filteredPostings.length} postings for ${ownerName}`);
 		
 		return {
 			data: filteredPostings,

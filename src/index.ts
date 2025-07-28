@@ -988,37 +988,20 @@ export class LeverMCP extends McpAgent {
 
 					if (args.owner_id) {
 						// More efficient: Get all postings and filter by owner ID
-						// Fetch ALL postings to ensure we find all for this owner
-						const allPostings: LeverPosting[] = [];
-						let offset: string | undefined;
-						let hasMore = true;
-						
-						// Keep fetching until we have all postings
-						while (hasMore && allPostings.length < 1000) { // Safety limit
-							const batchResponse = await this.client.getPostings(args.state, 100, offset, ["owner", "hiringManager"]);
-							
-							if (batchResponse.data && batchResponse.data.length > 0) {
-								allPostings.push(...batchResponse.data);
-							}
-							
-							hasMore = batchResponse.hasNext || false;
-							offset = batchResponse.next;
-						}
+						// Expand both owner and hiringManager to get names
+						const allPostingsResponse = await this.client.getPostings(args.state, args.limit, undefined, ["owner", "hiringManager"]);
 						
 						// Filter by owner ID
-						const filteredPostings = allPostings.filter(posting => {
+						const filteredPostings = allPostingsResponse.data.filter(posting => {
 							if (typeof posting.owner === 'object' && posting.owner?.id) {
 								return posting.owner.id === args.owner_id;
 							}
 							return false;
 						});
 						
-						// Apply limit after filtering
-						const limitedPostings = args.limit ? filteredPostings.slice(0, args.limit) : filteredPostings;
-						
 						response = {
-							data: limitedPostings,
-							hasNext: filteredPostings.length > args.limit,
+							data: filteredPostings,
+							hasNext: false,
 							next: undefined,
 						};
 					} else {
