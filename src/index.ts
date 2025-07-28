@@ -128,6 +128,8 @@ export class LeverMCP {
 		this.state = state;
 		this.env = env;
 		
+		console.log("LeverMCP constructor called");
+		
 		// Initialize MCP server
 		this.server = new McpServer({
 			name: "Lever ATS",
@@ -138,9 +140,9 @@ export class LeverMCP {
 			}
 		});
 		
-		// Initialize on construction
-		this.state.blockConcurrencyWhile(async () => {
-			await this.init();
+		// Initialize immediately
+		this.init().catch(error => {
+			console.error("Failed to initialize LeverMCP:", error);
 		});
 	}
 	
@@ -181,13 +183,24 @@ export class LeverMCP {
 		
 		// Log all registered tools to help debug ghost tools
 		console.log("=== LEVER MCP: All registered tools ===");
-		const tools = (this.server as any)._tools || (this.server as any).tools || [];
-		if (Array.isArray(tools)) {
+		const tools = (this.server as any)._tools || (this.server as any).tools || (this.server as any)._registeredTools || [];
+		console.log("Tools object type:", typeof tools);
+		console.log("Tools object:", tools);
+		
+		if (tools instanceof Map) {
+			console.log("Tools is a Map with", tools.size, "entries");
+			tools.forEach((tool, name) => {
+				console.log(`- ${name}`);
+			});
+		} else if (Array.isArray(tools)) {
+			console.log("Tools is an array with", tools.length, "entries");
 			tools.forEach((tool: any) => {
 				console.log(`- ${tool.name || tool}`);
 			});
 		} else if (typeof tools === 'object') {
-			Object.keys(tools).forEach(toolName => {
+			const keys = Object.keys(tools);
+			console.log("Tools is an object with", keys.length, "keys");
+			keys.forEach(toolName => {
 				console.log(`- ${toolName}`);
 			});
 		}
@@ -1549,11 +1562,20 @@ export class LeverMCP {
 				
 				if (message.method === "initialize") {
 					// Initialize handshake
+					const clientProtocolVersion = message.params?.protocolVersion;
+					console.log("Client protocol version:", clientProtocolVersion);
+					
+					// Support multiple protocol versions
+					const supportedVersions = ["2024-11-05", "2025-06-18"];
+					const protocolVersion = supportedVersions.includes(clientProtocolVersion) 
+						? clientProtocolVersion 
+						: "2024-11-05";
+					
 					response = {
 						jsonrpc: "2.0",
 						id: message.id,
 						result: {
-							protocolVersion: "2024-11-05",
+							protocolVersion,
 							capabilities: {
 								tools: {}
 							},
@@ -1565,20 +1587,53 @@ export class LeverMCP {
 					};
 				} else if (message.method === "tools/list") {
 					// Return the list of available tools
-					const tools = (this.server as any)._registeredTools || new Map();
+					console.log("Tools list requested");
+					
+					// Try different ways to get the tools
+					const tools = (this.server as any)._tools || 
+								 (this.server as any).tools || 
+								 (this.server as any)._registeredTools || 
+								 (this.server as any).registeredTools ||
+								 new Map();
+					
+					console.log("Found tools object:", tools);
+					console.log("Tools type:", typeof tools, tools instanceof Map ? "Map" : "Not Map");
+					
+					let toolsList: Array<{
+						name: string;
+						description: string;
+						inputSchema: any;
+					}> = [];
+					
+					if (tools instanceof Map) {
+						toolsList = Array.from(tools).map(([name, tool]) => ({
+							name,
+							description: (tool as any).description || "",
+							inputSchema: (tool as any).inputSchema || {
+								type: "object",
+								properties: {},
+								required: []
+							}
+						}));
+					} else if (Array.isArray(tools)) {
+						toolsList = tools.map((tool: any) => ({
+							name: tool.name || "",
+							description: tool.description || "",
+							inputSchema: tool.inputSchema || {
+								type: "object",
+								properties: {},
+								required: []
+							}
+						}));
+					}
+					
+					console.log("Returning tools list with", toolsList.length, "tools");
+					
 					response = {
 						jsonrpc: "2.0",
 						id: message.id,
 						result: {
-							tools: Array.from(tools as Map<string, any>).map(([name, tool]) => ({
-								name,
-								description: tool.description || "",
-								inputSchema: tool.inputSchema || {
-									type: "object",
-									properties: {},
-									required: []
-								}
-							}))
+							tools: toolsList
 						}
 					};
 				} else if (message.method === "tools/call") {
