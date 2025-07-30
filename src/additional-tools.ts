@@ -1167,6 +1167,9 @@ export function registerAdditionalTools(
 			summary_mode: z.boolean().default(true).describe("Return summary statistics instead of full candidate details"),
 			include_candidate_details: z.string().optional().describe("Comma-separated posting IDs to include full candidate details for specific postings only"),
 			focus_interviews_only: z.boolean().default(false).describe("Only include candidates with upcoming interviews"),
+			// Interview optimization parameters
+			prioritize_interview_stages: z.boolean().default(true).describe("Prioritize checking candidates in interview-relevant stages first for more accurate interview counts"),
+			interview_priority_stages: z.string().optional().describe("Comma-separated list of stage names to prioritize for interview checking (e.g., 'TA Phone Screen,Hiring Manager Interview,Loop Interview')"),
 		},
 		async (args) => {
 			try {
@@ -1374,13 +1377,74 @@ export function registerAdditionalTools(
 					}
 					postingSummary.stage_breakdown = postingStages;
 
-					// Interview tracking
+					// Interview tracking with optimized stage prioritization
 					let candidatesWithInterviews: any[] = [];
 					
 					if (args.include_interviews && subrequestCount < 900) {
-						// For interview focus mode, check ALL candidates
-						const candidatesToCheck = args.focus_interviews_only ? candidates : candidates.slice(0, 20);
+						// Define default interview-relevant stages (can be overridden by user)
+						const defaultInterviewStages = [
+							'TA Phone Screen', 'ta phone screen',
+							'Hiring Manager Interview', 'hiring manager interview', 
+							'Loop Interview', 'loop interview',
+							'Loop Interview 2', 'loop interview 2',
+							'Executive Interview', 'executive interview',
+							'Aptitude Assessment', 'aptitude assessment',
+							'Final Interview', 'final interview',
+							'Phone Screen', 'phone screen',
+							'Technical Interview', 'technical interview',
+							'Panel Interview', 'panel interview',
+							'Reference Check', 'reference check',
+							'Background Check', 'background check'
+						];
 						
+						// Parse user-defined priority stages or use defaults
+						const priorityStageNames = args.interview_priority_stages 
+							? args.interview_priority_stages.split(',').map(s => s.trim())
+							: defaultInterviewStages;
+						
+						let candidatesToCheck: any[] = [];
+						
+						if (args.focus_interviews_only) {
+							// Check ALL candidates if focus_interviews_only is true
+							candidatesToCheck = candidates;
+						} else if (args.prioritize_interview_stages) {
+							// Split candidates into priority and non-priority groups
+							const priorityCandidates: any[] = [];
+							const otherCandidates: any[] = [];
+							
+							for (const candidate of candidates) {
+								const candidateStage = typeof candidate.stage === 'object' && candidate.stage?.text 
+									? candidate.stage.text 
+									: (typeof candidate.stage === 'string' ? candidate.stage : '');
+								
+								// Check if candidate is in an interview-relevant stage (case-insensitive)
+								const isInterviewStage = priorityStageNames.some(stageName => 
+									candidateStage.toLowerCase().includes(stageName.toLowerCase()) ||
+									stageName.toLowerCase().includes(candidateStage.toLowerCase())
+								);
+								
+								if (isInterviewStage) {
+									priorityCandidates.push(candidate);
+								} else {
+									otherCandidates.push(candidate);
+								}
+							}
+							
+							// Check priority candidates first, then others if we have API calls left
+							// Limit to reasonable numbers to stay under API limits
+							const maxPriorityCandidates = Math.min(priorityCandidates.length, 50);
+							const maxOtherCandidates = Math.min(otherCandidates.length, 20);
+							
+							candidatesToCheck = [
+								...priorityCandidates.slice(0, maxPriorityCandidates),
+								...otherCandidates.slice(0, maxOtherCandidates)
+							];
+						} else {
+							// Original behavior: just check first 20 candidates
+							candidatesToCheck = candidates.slice(0, 20);
+						}
+						
+						// Check interviews for selected candidates
 						for (const candidate of candidatesToCheck) {
 							if (subrequestCount >= 900) break;
 							
@@ -1495,11 +1559,13 @@ export function registerAdditionalTools(
 						display_mode: args.summary_mode ? "summary" : "detailed",
 					},
 					
-					// Performance metrics
+										// Performance metrics
 					performance: {
-											api_calls_used: subrequestCount,
-					subrequest_limit_reached: subrequestCount >= 900,
+						api_calls_used: subrequestCount,
+						subrequest_limit_reached: subrequestCount >= 900,
 						used_owner_id: !!args.owner_id,
+						interview_optimization_enabled: args.prioritize_interview_stages,
+						custom_priority_stages: !!args.interview_priority_stages,
 					},
 					
 					// Interview focus section
@@ -1520,6 +1586,8 @@ export function registerAdditionalTools(
 						view_details: "To see full candidate details for specific postings, use include_candidate_details parameter with posting IDs",
 						get_all_candidates: "Use max_candidates_per_posting: -1 to fetch ALL candidates (may hit API limits)",
 						focus_interviews: "Use focus_interviews_only: true to only see candidates with upcoming interviews",
+						interview_optimization: "Interview stage prioritization is " + (args.prioritize_interview_stages ? "ENABLED" : "DISABLED") + ". This prioritizes checking candidates in interview stages first for more accurate interview counts.",
+						custom_stages: args.interview_priority_stages ? "Using custom priority stages: " + args.interview_priority_stages : "Using default interview-relevant stages (TA Phone Screen, Hiring Manager Interview, Loop Interview, etc.)",
 					};
 				}
 
