@@ -1,6 +1,6 @@
 # Lever MCP Server
 
-A Model Context Protocol (MCP) server that integrates Lever ATS with Claude Desktop and other MCP clients, enabling recruiters to manage their recruiting workflows through natural language commands. Built on Cloudflare Workers for global edge deployment.
+A MCP server that integrates Lever ATS with Claude Desktop and other MCP clients, enabling recruiters to manage their recruiting workflows through natural language commands. Built on Cloudflare Workers for global edge deployment.
 
 ## 🚀 Features
 
