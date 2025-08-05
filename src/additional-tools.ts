@@ -892,4 +892,93 @@ export function registerAdditionalTools(
 			}
 		},
 	);
+
+	// Consolidated update tool for stage, owner, and tags
+	server.tool(
+		"lever_update_candidate",
+		{
+			opportunity_id: z.string().describe("The candidate's opportunity ID"),
+			stage_id: z.string().optional().describe("Move to this stage ID"),
+			stage_name: z.string().optional().describe("Move to stage with this name"),
+			owner_id: z.string().optional().describe("Assign to this user"),
+			add_tags: z.array(z.string()).optional().describe("Tags to add"),
+			remove_tags: z.array(z.string()).optional().describe("Tags to remove"),
+		},
+		async (args) => {
+			try {
+				const updates: any = {};
+				
+				// Handle stage update by name
+				if (args.stage_name && !args.stage_id) {
+					const stages = await client.getStages();
+					const stage = stages.data.find((s: any) => 
+						s.text.toLowerCase().includes(args.stage_name!.toLowerCase())
+					);
+					if (stage) {
+						args.stage_id = stage.id;
+					} else {
+						throw new Error(`Stage "${args.stage_name}" not found`);
+					}
+				}
+				
+				// Perform updates
+				const results = [];
+				
+				if (args.stage_id) {
+					await client.updateOpportunityStage(args.opportunity_id, args.stage_id);
+					results.push({ action: "stage_updated", stage_id: args.stage_id });
+				}
+				
+				if (args.owner_id) {
+					// Note: This would need a new method in LeverClient
+					// await client.updateOpportunityOwner(args.opportunity_id, args.owner_id);
+					results.push({ action: "owner_updated", owner_id: args.owner_id, note: "Owner update not yet implemented in LeverClient" });
+				}
+				
+				if (args.add_tags || args.remove_tags) {
+					// Handle tag updates
+					if (args.add_tags && args.add_tags.length > 0) {
+						await client.addCandidateTags(args.opportunity_id, args.add_tags);
+					}
+					if (args.remove_tags && args.remove_tags.length > 0) {
+						await client.removeCandidateTags(args.opportunity_id, args.remove_tags);
+					}
+					results.push({ 
+						action: "tags_updated", 
+						added: args.add_tags || [],
+						removed: args.remove_tags || []
+					});
+				}
+				
+				// Get updated candidate info
+				const opportunityResponse = await client.getOpportunity(args.opportunity_id);
+				const opportunity = opportunityResponse.data;
+				
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({
+							success: true,
+							opportunity_id: args.opportunity_id,
+							candidate_name: opportunity.name || "Unknown",
+							current_stage: typeof opportunity.stage === 'object' && opportunity.stage 
+								? opportunity.stage.text 
+								: "Unknown",
+							updates: results
+						}, null, 2)
+					}]
+				};
+			} catch (error) {
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({
+							error: error instanceof Error ? error.message : String(error),
+							opportunity_id: args.opportunity_id
+						})
+					}]
+				};
+			}
+		}
+	);
 }

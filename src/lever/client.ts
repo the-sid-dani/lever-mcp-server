@@ -466,4 +466,55 @@ export class LeverClient {
 
 		return this.makeRequest("GET", "/opportunities", queryParams);
 	}
+
+	// Tag management methods
+	async addCandidateTags(
+		opportunityId: string,
+		tags: string[],
+		performAs?: string
+	): Promise<any> {
+		const params: any = {};
+		if (performAs) {
+			params.perform_as = performAs;
+		}
+		
+		return this.makeRequest(
+			"POST",
+			`/opportunities/${opportunityId}/addTags`,
+			params,
+			{ tags }
+		);
+	}
+
+	async removeCandidateTags(
+		opportunityId: string,
+		tags: string[],
+		performAs?: string
+	): Promise<any> {
+		const params: any = {};
+		if (performAs) {
+			params.perform_as = performAs;
+		}
+		
+		return this.makeRequest(
+			"POST",
+			`/opportunities/${opportunityId}/removeTags`,
+			params,
+			{ tags }
+		);
+	}
+
+	// Note: The following methods are placeholders for functionality that may not be 
+	// directly supported by the Lever API or require additional research:
+	
+	// async getUsers(): Promise<any> {
+	//   // TODO: Implement if/when Lever API provides a users endpoint
+	//   throw new Error("getUsers is not yet implemented - Lever API documentation needed");
+	// }
+	
+	// async updateOpportunityOwner(opportunityId: string, ownerId: string): Promise<any> {
+	//   // TODO: Implement if/when Lever API provides an owner update endpoint
+	//   // The API doesn't seem to have a direct endpoint for updating the owner field
+	//   throw new Error("updateOpportunityOwner is not yet implemented - Lever API may not support this directly");
+	// }
 }
