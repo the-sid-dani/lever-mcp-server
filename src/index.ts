@@ -4,6 +4,7 @@ import { z } from "zod";
 import { LeverClient } from "./lever/client";
 import type { LeverOpportunity, LeverPosting } from "./types/lever";
 import { registerAdditionalTools } from "./additional-tools";
+import { resolveStageIdentifier } from "./utils/stage-helpers";
 
 // Environment interface
 interface Env {
@@ -290,6 +291,15 @@ export class LeverMCP extends McpAgent {
 				posting_id: z.string().optional(),
 				limit: z.number().default(50).describe("Results per page (recommended: 20-50 for broad searches)"),
 				page: z.number().default(1).describe("Page number (1-based)"),
+				// New enhanced parameters
+				stages: z.array(z.string()).optional().describe("Stage names to filter by"),
+				stage_contains: z.string().optional().describe("Find stages containing this text"),
+				name: z.string().optional().describe("Candidate name search"),
+				email: z.string().optional().describe("Exact email match"),
+				current_company_only: z.boolean().optional().default(false),
+				archived: z.boolean().optional().default(false).describe("Include archived candidates"),
+				created_after: z.string().optional().describe("Filter by creation date (ISO format)"),
+				mode: z.enum(["comprehensive", "quick"]).default("comprehensive").describe("Search mode"),
 			},
 			this.wrapToolWithTrace("lever_advanced_search", async (args) => {
 				try {
@@ -307,12 +317,43 @@ export class LeverMCP extends McpAgent {
 						? args.tags.split(",").map((t: string) => t.trim().toLowerCase())
 						: [];
 
+					// Parse new enhanced parameters
+					const stageList = args.stages || [];
+					const nameSearch = args.name?.toLowerCase();
+					const emailSearch = args.email?.toLowerCase();
+
+					// Resolve stage names to IDs if needed
+					let stageIds: string[] = [];
+					if (stageList.length > 0) {
+						try {
+							stageIds = await resolveStageIdentifier(this.client, stageList);
+						} catch (error) {
+							console.warn("Failed to resolve some stage names:", error);
+						}
+					}
+
+					// Handle stage_contains by getting all stages
+					let stageContainsIds: string[] = [];
+					if (args.stage_contains) {
+						try {
+							const stages = await this.client.getStages();
+							stageContainsIds = stages.data
+								.filter((s: any) => s.text.toLowerCase().includes(args.stage_contains!.toLowerCase()))
+								.map((s: any) => s.id);
+						} catch (error) {
+							console.warn("Failed to fetch stages for stage_contains:", error);
+						}
+					}
+
 					const allCandidates: LeverOpportunity[] = [];
 					let offset: string | undefined;
 					// Updated for Cloudflare's paid plan with 1000 subrequest limit
 					// Each API call counts as a subrequest, and we fetch 100 candidates per call
 					// We can make up to 900 API calls (leaving 100 for other operations)
-					const maxFetch = Math.min(args.limit * 10, 10000, 90000); // Max 90,000 candidates = 900 API calls
+					// In quick mode, limit to 5 batches (500 candidates max)
+					const maxFetch = args.mode === "quick" 
+						? Math.min(args.limit * 3, 500) 
+						: Math.min(args.limit * 10, 10000, 90000); // Max 90,000 candidates = 900 API calls
 					let totalMatches = 0; // Track total matches for pagination info
 					let totalScanned = 0; // Track how many candidates we've looked at
 					let totalFetched = 0; // Track how many candidates we fetched from API
@@ -336,13 +377,32 @@ export class LeverMCP extends McpAgent {
 							await new Promise((resolve) => setTimeout(resolve, 300)); // 300ms delay = ~3 requests/second
 						}
 
-						const response = await this.client.getOpportunities({
-							stage_id: args.stage,
-							posting_id: args.posting_id,
-							tag: args.tags ? args.tags.split(",")[0] : undefined, // API only supports single tag
+						// If searching by email, use email parameter directly
+						const searchParams: any = {
 							limit: 100,
 							offset,
-						});
+						};
+
+						// Email search is most efficient when done through API
+						if (emailSearch) {
+							searchParams.email = args.email;
+						}
+
+						// Handle stage filtering - prefer new stages array over single stage
+						if (stageIds.length > 0) {
+							// API only supports single stage_id, use first one
+							searchParams.stage_id = stageIds[0];
+						} else if (stageContainsIds.length > 0) {
+							searchParams.stage_id = stageContainsIds[0];
+						} else if (args.stage) {
+							searchParams.stage_id = args.stage;
+						}
+
+						if (args.posting_id) searchParams.posting_id = args.posting_id;
+						if (args.tags) searchParams.tag = args.tags.split(",")[0]; // API only supports single tag
+						if (args.archived !== undefined) searchParams.archived = args.archived;
+
+						const response = await this.client.getOpportunities(searchParams);
 
 						apiCallCount++; // Increment API call counter
 						
@@ -426,15 +486,58 @@ export class LeverMCP extends McpAgent {
 								cAllText += ` ${cResume}`;
 							}
 
-							// Check each criteria
+							// Check new enhanced criteria first (early filtering)
+							// Name match
+							if (nameSearch && !cName.includes(nameSearch)) {
+								return false;
+							}
+
+							// Email match (exact match if not using API email search)
+							if (emailSearch && !searchParams.email && !cEmailsLower.includes(emailSearch)) {
+								return false;
+							}
+
+							// Stage filtering (handle multiple stages with OR logic)
+							if (stageIds.length > 1 || stageContainsIds.length > 1) {
+								const candidateStageId = typeof c.stage === 'object' && c.stage ? c.stage.id : c.stage;
+								const allStageIds = [...stageIds, ...stageContainsIds];
+								if (!allStageIds.includes(candidateStageId as string)) {
+									return false;
+								}
+							}
+
+							// Archived filter
+							if (args.archived === false && c.archived) {
+								return false;
+							}
+
+							// Created after filter
+							if (args.created_after && c.createdAt) {
+								const createdDate = new Date(c.createdAt);
+								const filterDate = new Date(args.created_after);
+								if (createdDate < filterDate) {
+									return false;
+								}
+							}
+
+							// Check each existing criteria
 							// Company match: check in headline (primary) or organizations
-							const companyMatch =
-								!companyList.length ||
-								companyList.some(
-									(comp: string) =>
-										cHeadline.includes(comp) ||
-										cOrganizationsLower.some((org: string) => org.includes(comp)),
-								);
+							let companyMatch = !companyList.length;
+							if (companyList.length > 0) {
+								// If current_company_only is true, only check the first company in headline
+								if (args.current_company_only) {
+									// Extract current company (first one in headline)
+									const currentCompany = cHeadline.split(',')[0].trim();
+									companyMatch = companyList.some((comp: string) => currentCompany.includes(comp));
+								} else {
+									// Original logic - check all companies
+									companyMatch = companyList.some(
+										(comp: string) =>
+											cHeadline.includes(comp) ||
+											cOrganizationsLower.some((org: string) => org.includes(comp))
+									);
+								}
+							}
 
 							// Skills match: ANY skill match (OR logic)
 							const skillMatch =
@@ -524,8 +627,16 @@ export class LeverMCP extends McpAgent {
 											skills: args.skills,
 											locations: args.locations,
 											stage: args.stage,
+											stages: args.stages,
+											stage_contains: args.stage_contains,
+											name: args.name,
+											email: args.email,
+											current_company_only: args.current_company_only,
+											archived: args.archived,
+											created_after: args.created_after,
 											tags: args.tags,
 											posting: args.posting_id,
+											mode: args.mode,
 										},
 						search_stats: {
 							candidates_scanned: totalScanned,
@@ -580,8 +691,16 @@ export class LeverMCP extends McpAgent {
 											skills: args.skills,
 											locations: args.locations,
 											stage: args.stage,
+											stages: args.stages,
+											stage_contains: args.stage_contains,
+											name: args.name,
+											email: args.email,
+											current_company_only: args.current_company_only,
+											archived: args.archived,
+											created_after: args.created_after,
 											tags: args.tags,
 											posting: args.posting_id,
+											mode: args.mode,
 										},
 										candidates: [],
 									},
