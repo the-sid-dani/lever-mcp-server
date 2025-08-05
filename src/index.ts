@@ -4,6 +4,7 @@ import { z } from "zod";
 import { LeverClient } from "./lever/client";
 import type { LeverOpportunity, LeverPosting } from "./types/lever";
 import { registerAdditionalTools } from "./additional-tools";
+import { registerInterviewTools } from "./interview-tools";
 import { resolveStageIdentifier } from "./utils/stage-helpers";
 
 // Environment interface
@@ -264,6 +265,10 @@ export class LeverMCP extends McpAgent {
 			// Register additional tools to complete the set of 16
 			registerAdditionalTools(this.server, this.client);
 			this.trace(traceId, "REGISTER_TOOLS", { phase: "additional_tools_complete" });
+			
+			// Register interview tools
+			registerInterviewTools(this.server, this.client);
+			this.trace(traceId, "REGISTER_TOOLS", { phase: "interview_tools_complete" });
 			
 			// Mark tools as registered
 			this.toolsRegistered = true;

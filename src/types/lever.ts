@@ -79,17 +79,94 @@ export interface LeverUser {
 	deactivatedAt?: number;
 }
 
-// Add interview-related interfaces for future functionality
-export interface LeverInterview {
+// Interview-related interfaces based on Lever API documentation
+
+/**
+ * Interface representing an interviewer in a Lever interview
+ */
+export interface LeverInterviewer {
+	/** Unique identifier for the interviewer */
 	id: string;
-	subject?: string;
+	/** Full name of the interviewer */
+	name: string;
+	/** Email address of the interviewer */
+	email: string;
+	/** Optional feedback template specific to this interviewer */
+	feedbackTemplate?: string;
+}
+
+/**
+ * Interface representing a Lever interview panel
+ * Panels are containers that group related interviews together
+ */
+export interface LeverPanel {
+	/** Unique identifier for the panel */
+	id: string;
+	/** Array of Application UIDs that the panel is associated with */
+	applications: string[];
+	/** Datetime when panel was canceled. Value is null if panel was never canceled */
+	canceledAt?: number | null;
+	/** Datetime when panel was created */
+	createdAt: number;
+	/** Datetime when the first interview in the panel starts */
+	start: number;
+	/** Datetime when the last interview in the panel ends */
+	end: number;
+	/** Name of timezone in which panel was scheduled to occur */
+	timezone: string;
+	/** Frequency of feedback reminders (once, daily, frequently, none) */
+	feedbackReminder: string;
+	/** The user who created the panel */
+	user: string;
+	/** The stage in which the candidate resided when this panel was scheduled */
+	stage: string;
+	/** Optional panel note */
 	note?: string;
-	interviewers?: LeverUser[];
-	timezone?: string;
-	createdAt?: number;
-	date?: number;
-	duration?: number;
+	/** Whether this panel is created via API or integration */
+	externallyManaged: boolean;
+	/** URL linking to an external entity associated with this interview */
+	externalUrl?: string;
+	/** Array of interview objects within this panel */
+	interviews: LeverInterview[];
+}
+
+/**
+ * Interface representing a Lever interview
+ * Interviews must be created within panels
+ */
+export interface LeverInterview {
+	/** Unique identifier for the interview */
+	id: string;
+	/** Interview Panel UID */
+	panel: string;
+	/** Interview subject or title */
+	subject?: string;
+	/** Interview note with schedule details */
+	note?: string;
+	/** Array of interviewers with their details */
+	interviewers: LeverInterviewer[];
+	/** Name of timezone in which interview was scheduled */
+	timezone: string;
+	/** Datetime when interview was created */
+	createdAt: number;
+	/** Datetime when interview is scheduled to occur */
+	date: number;
+	/** Interview duration in minutes */
+	duration: number;
+	/** Interview location (e.g., conference room, phone number) */
 	location?: string;
-	phone?: string;
-	gcalEventUrl?: string;
+	/** ID of the feedback template for this interview */
+	feedbackTemplate?: string;
+	/** Array of feedback form IDs submitted for this interview */
+	feedbackForms: string[];
+	/** Frequency of feedback reminders (once, daily, frequently, none) */
+	feedbackReminder: string;
+	/** User who created the interview */
+	user: string;
+	/** Stage ID where the interview belongs */
+	stage: string;
+	/** Datetime when interview was canceled. Value is null if never canceled */
+	canceledAt?: number | null;
+	/** Array of posting IDs associated with this interview */
+	postings: string[];
 }
