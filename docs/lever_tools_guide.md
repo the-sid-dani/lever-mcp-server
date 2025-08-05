@@ -1,6 +1,6 @@
-# Lever MCP Tools Complete Guide - v2.0
+# Lever MCP Tools Complete Guide - v3.0
 
-This guide provides a comprehensive overview of all 14 Lever MCP tools after the consolidation that reduced the toolset from 29 to 14 tools while enhancing functionality.
+This guide provides a comprehensive overview of all 16 Lever MCP tools. Version 3.0 adds interview management capabilities with 2 new tools, expanding from the 14 tools in v2.0.
 
 ## Table of Contents
 1. [Primary Search Tools](#primary-search-tools) (2 tools)
@@ -10,6 +10,7 @@ This guide provides a comprehensive overview of all 14 Lever MCP tools after the
 5. [File & Application Management Tools](#file--application-management-tools) (2 tools)
 6. [Candidate Update Tools](#candidate-update-tools) (1 tool)
 7. [Archived Candidate Tools](#archived-candidate-tools) (1 tool)
+8. [Interview Management Tools](#interview-management-tools) (2 tools) 🆕
 
 ---
 
@@ -364,6 +365,122 @@ lever_search_archived_candidates({
 
 ---
 
+## Interview Management Tools
+
+### 15. lever_get_interview_insights 🆕 New Tool
+**What it does:** Provides comprehensive interview data and insights with flexible filtering options for WHO, WHEN, and WHAT you want to see.
+
+**Capabilities:**
+- **WHO Filtering**: Filter by owner_email, posting_id, opportunity_id, or interviewer_email
+- **WHEN Filtering**: Use time_scope (past_week, this_week, next_week, this_month, custom)
+- **WHAT Views**: Choose view_type (dashboard, detailed, analytics, preparation)
+- **Smart Filters**: Filter by status, stage, priority, and feedback submission
+- **Bulk Analysis**: Aggregate data across multiple opportunities
+
+**Use when:**
+- Need interview dashboard for upcoming week
+- Analyzing interviewer workload
+- Tracking feedback completion rates
+- Preparing for interviews
+- Generating interview analytics
+
+**How to use:**
+```
+"Show me all interviews for this week"
+lever_get_interview_insights({ 
+  time_scope: "this_week",
+  view_type: "dashboard"
+})
+
+"Get detailed interview schedule for opportunity ABC"
+lever_get_interview_insights({
+  opportunity_id: "ABC",
+  view_type: "detailed",
+  include_candidate_context: true
+})
+
+"Analytics for all technical interviews this month"
+lever_get_interview_insights({
+  time_scope: "this_month",
+  stage_filter: "Technical Interview",
+  view_type: "analytics"
+})
+```
+
+**View Types:**
+- **dashboard**: Summary statistics, upcoming/recent interviews
+- **detailed**: Full interview details with all metadata
+- **analytics**: Interviewer performance, scheduling patterns
+- **preparation**: Next interview details and prep notes
+
+**Limitations:**
+- Currently requires opportunity_id for specific data
+- Broader searches (by posting/owner) show placeholder message
+- No real-time availability checking
+
+---
+
+### 16. lever_manage_interview 🆕 New Tool
+**What it does:** Manages the complete interview lifecycle - schedule, reschedule, cancel, and track outcomes.
+
+**Actions:**
+- **schedule**: Create new interview (within a panel)
+- **reschedule**: Change interview date/time
+- **cancel**: Cancel an interview
+- **update_outcome**: Record interview results (use notes)
+- **bulk_schedule**: Schedule multiple interviews
+- **check_availability**: Not supported (API limitation)
+
+**Use when:**
+- Scheduling any type of interview
+- Need to reschedule due to conflicts
+- Canceling interviews
+- Recording interview outcomes
+- Setting up interview panels
+
+**How to use:**
+```
+"Schedule a technical interview for tomorrow at 2pm"
+lever_manage_interview({
+  action: "schedule",
+  opportunity_id: "opp123",
+  perform_as: "user123",
+  interview_details: {
+    type: "technical",
+    date: "2024-01-16T14:00:00Z",
+    duration_minutes: 60,
+    location: "Zoom link",
+    subject: "Technical Interview",
+    timezone: "America/Los_Angeles",
+    interviewers: [{ id: "int123" }]
+  }
+})
+
+"Reschedule interview ABC to next Monday"
+lever_manage_interview({
+  action: "reschedule",
+  opportunity_id: "opp123",
+  interview_id: "int456",
+  perform_as: "user123",
+  reschedule_data: {
+    new_date: "2024-01-22T14:00:00Z",
+    reason: "Candidate conflict"
+  }
+})
+```
+
+**Critical Requirements:**
+- **perform_as**: Required for all create/update/delete operations
+- **Panel Creation**: Interviews must be created within panels
+- **externallyManaged**: Only API-created interviews can be modified
+
+**Limitations:**
+- Cannot modify interviews created in Lever UI
+- No calendar/availability integration
+- Bulk operations create individual panels per opportunity
+
+---
+
 ## Migration Guide: What Changed
 
 ### Tools Removed (Your Old Workflows)
@@ -433,6 +550,12 @@ lever_advanced_search({
 3. **Search Limits**: Results limited based on tool and mode
 4. **Rate Limits**: Maximum 8 requests per second
 5. **Owner Updates**: Cannot update candidate owner (API limitation)
+6. **Interview Restrictions**: 
+   - Cannot modify interviews created in Lever UI (only API-created)
+   - No calendar/availability checking
+   - Interviews must be created within panels
+   - `perform_as` parameter required for all modifications
+7. **No Real-time Data**: Interview insights require specific opportunity_id
 
 ## Best Practices
 
@@ -442,3 +565,23 @@ lever_advanced_search({
 - **Use specific filters** to reduce result sets
 - **Add descriptive notes** for future reference
 - **Check archive reasons** before archiving candidates
+- **Use perform_as parameter** for interview modifications
+- **Create interviews within panels** as required by API
+
+---
+
+## Version History
+
+### v3.0 (January 2025)
+- Added 2 new interview management tools:
+  - `lever_get_interview_insights` - Comprehensive interview data and analytics
+  - `lever_manage_interview` - Complete interview lifecycle management
+- Enhanced documentation with interview-specific limitations
+- Added support for panel-based interview creation
+- Total tools increased from 14 to 16
+
+### v2.0 (Previous)
+- Consolidated tools from 29 to 14
+- Enhanced stage name support across all tools
+- Improved search capabilities
+- Streamlined tool interfaces

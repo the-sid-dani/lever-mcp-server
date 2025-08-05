@@ -2,6 +2,8 @@ import type {
 	LeverApiResponse,
 	LeverOpportunity,
 	LeverPosting,
+	LeverInterview,
+	LeverPanel,
 } from "../types/lever";
 
 // Simple token bucket implementation for rate limiting
@@ -107,7 +109,7 @@ export class LeverClient {
 						const retryAfter = response.headers.get('Retry-After');
 						const waitTime = retryAfter 
 							? parseInt(retryAfter) * 1000 
-							: Math.min(Math.pow(2, retryCount) * 1000, 30000); // Max 30s
+							: Math.min(2 ** retryCount * 1000, 30000); // Max 30s
 						
 						console.error(`Rate limited (429). Waiting ${waitTime}ms before retry...`);
 						
@@ -123,7 +125,7 @@ export class LeverClient {
 					if (response.status >= 500 && retryCount < 2) {
 						console.error(`Lever API error ${response.status}, retrying... (attempt ${retryCount + 1}/3)`);
 						// Wait before retrying (exponential backoff)
-						await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+						await new Promise(resolve => setTimeout(resolve, 2 ** retryCount * 1000));
 						return this.makeRequest<T>(method, endpoint, params, body, retryCount + 1);
 					}
 					
@@ -148,7 +150,7 @@ export class LeverClient {
 				// Retry on network errors
 				if (retryCount < 2 && error instanceof TypeError && error.message.includes('fetch')) {
 					console.error(`Network error, retrying... (attempt ${retryCount + 1}/3)`);
-					await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+					await new Promise(resolve => setTimeout(resolve, 2 ** retryCount * 1000));
 					return this.makeRequest<T>(method, endpoint, params, body, retryCount + 1);
 				}
 				throw error;
@@ -374,10 +376,7 @@ export class LeverClient {
 		return this.makeRequest("DELETE", `/requisitions/${requisitionId}`);
 	}
 
-	// Add method to get interviews for a candidate
-	async getOpportunityInterviews(opportunityId: string): Promise<any> {
-		return this.makeRequest("GET", `/opportunities/${opportunityId}/interviews`);
-	}
+
 
 	// Add method to find postings by owner name
 	async getPostingsByOwner(ownerName: string, state: string = "published"): Promise<LeverApiResponse<LeverPosting>> {
@@ -502,6 +501,216 @@ export class LeverClient {
 			params,
 			{ tags }
 		);
+	}
+
+	// Interview and Panel Management Methods
+	
+	/**
+	 * Retrieves all interviews for a specific opportunity
+	 * @param opportunityId The ID of the opportunity
+	 * @returns Promise resolving to an array of LeverInterview objects
+	 */
+	async getOpportunityInterviews(opportunityId: string): Promise<{ data: LeverInterview[], hasNext: boolean }> {
+		return this.makeRequest('GET', `opportunities/${opportunityId}/interviews`);
+	}
+
+	/**
+	 * Retrieves a specific interview by ID
+	 * @param opportunityId The ID of the opportunity
+	 * @param interviewId The ID of the interview
+	 * @returns Promise resolving to a LeverInterview object
+	 */
+	async getInterview(opportunityId: string, interviewId: string): Promise<{ data: LeverInterview }> {
+		return this.makeRequest('GET', `opportunities/${opportunityId}/interviews/${interviewId}`);
+	}
+
+	/**
+	 * Retrieves all panels for a specific opportunity
+	 * @param opportunityId The ID of the opportunity
+	 * @returns Promise resolving to an array of LeverPanel objects
+	 */
+	async getOpportunityPanels(opportunityId: string): Promise<{ data: LeverPanel[], hasNext: boolean }> {
+		return this.makeRequest('GET', `opportunities/${opportunityId}/panels`);
+	}
+
+	/**
+	 * Retrieves a specific panel by ID
+	 * @param opportunityId The ID of the opportunity
+	 * @param panelId The ID of the panel
+	 * @returns Promise resolving to a LeverPanel object
+	 */
+	async getPanel(opportunityId: string, panelId: string): Promise<{ data: LeverPanel }> {
+		return this.makeRequest('GET', `opportunities/${opportunityId}/panels/${panelId}`);
+	}
+
+	/**
+	 * Creates a new interview for an opportunity
+	 * @param opportunityId The ID of the opportunity
+	 * @param interviewData The interview data to create
+	 * @param performAs Optional user ID to perform action as
+	 * @returns Promise resolving to the created LeverInterview object
+	 */
+	async createInterview(
+		opportunityId: string,
+		interviewData: {
+			panel: string;
+			subject?: string;
+			note?: string;
+			interviewers: Array<{ id: string; feedbackTemplate?: string }>;
+			date: number;
+			duration: number;
+			location?: string;
+			feedbackTemplate?: string;
+			feedbackReminder?: string;
+		},
+		performAs?: string
+	): Promise<{ data: LeverInterview }> {
+		const params: any = {};
+		if (performAs) {
+			params.perform_as = performAs;
+		}
+		return this.makeRequest('POST', `opportunities/${opportunityId}/interviews`, params, interviewData);
+	}
+
+	/**
+	 * Creates a new panel for an opportunity
+	 * @param opportunityId The ID of the opportunity
+	 * @param panelData The panel data to create
+	 * @param performAs Optional user ID to perform action as
+	 * @returns Promise resolving to the created LeverPanel object
+	 */
+	async createPanel(
+		opportunityId: string,
+		panelData: {
+			applications?: string[];
+			timezone: string;
+			feedbackReminder?: string;
+			note?: string;
+			externalUrl?: string;
+			interviews: Array<{
+				subject?: string;
+				note?: string;
+				interviewers: Array<{ id: string; feedbackTemplate?: string }>;
+				date: number;
+				duration: number;
+				location?: string;
+				feedbackTemplate?: string;
+				feedbackReminder?: string;
+			}>;
+		},
+		performAs?: string
+	): Promise<{ data: LeverPanel }> {
+		const params: any = {};
+		if (performAs) {
+			params.perform_as = performAs;
+		}
+		return this.makeRequest('POST', `opportunities/${opportunityId}/panels`, params, panelData);
+	}
+
+	/**
+	 * Updates an existing interview
+	 * @param opportunityId The ID of the opportunity
+	 * @param interviewId The ID of the interview to update
+	 * @param interviewData The updated interview data
+	 * @param performAs Optional user ID to perform action as
+	 * @returns Promise resolving to the updated LeverInterview object
+	 */
+	async updateInterview(
+		opportunityId: string,
+		interviewId: string,
+		interviewData: Partial<{
+			panel: string;
+			subject?: string;
+			note?: string;
+			interviewers: Array<{ id: string; feedbackTemplate?: string }>;
+			date: number;
+			duration: number;
+			location?: string;
+			feedbackTemplate?: string;
+			feedbackReminder?: string;
+		}>,
+		performAs?: string
+	): Promise<{ data: LeverInterview }> {
+		const params: any = {};
+		if (performAs) {
+			params.perform_as = performAs;
+		}
+		return this.makeRequest('PUT', `opportunities/${opportunityId}/interviews/${interviewId}`, params, interviewData);
+	}
+
+	/**
+	 * Updates an existing panel
+	 * @param opportunityId The ID of the opportunity
+	 * @param panelId The ID of the panel to update
+	 * @param panelData The updated panel data
+	 * @param performAs Optional user ID to perform action as
+	 * @returns Promise resolving to the updated LeverPanel object
+	 */
+	async updatePanel(
+		opportunityId: string,
+		panelId: string,
+		panelData: Partial<{
+			applications?: string[];
+			timezone: string;
+			feedbackReminder?: string;
+			note?: string;
+			externalUrl?: string;
+			interviews: Array<{
+				subject?: string;
+				note?: string;
+				interviewers: Array<{ id: string; feedbackTemplate?: string }>;
+				date: number;
+				duration: number;
+				location?: string;
+				feedbackTemplate?: string;
+				feedbackReminder?: string;
+			}>;
+		}>,
+		performAs?: string
+	): Promise<{ data: LeverPanel }> {
+		const params: any = {};
+		if (performAs) {
+			params.perform_as = performAs;
+		}
+		return this.makeRequest('PUT', `opportunities/${opportunityId}/panels/${panelId}`, params, panelData);
+	}
+
+	/**
+	 * Deletes an interview
+	 * @param opportunityId The ID of the opportunity
+	 * @param interviewId The ID of the interview to delete
+	 * @param performAs Optional user ID to perform action as
+	 * @returns Promise resolving to a success message
+	 */
+	async deleteInterview(
+		opportunityId: string,
+		interviewId: string,
+		performAs?: string
+	): Promise<void> {
+		const params: any = {};
+		if (performAs) {
+			params.perform_as = performAs;
+		}
+		await this.makeRequest('DELETE', `opportunities/${opportunityId}/interviews/${interviewId}`, params);
+	}
+
+	/**
+	 * Deletes a panel
+	 * @param opportunityId The ID of the opportunity
+	 * @param panelId The ID of the panel to delete
+	 * @param performAs Optional user ID to perform action as
+	 * @returns Promise resolving to a success message
+	 */
+	async deletePanel(
+		opportunityId: string,
+		panelId: string,
+		performAs?: string
+	): Promise<void> {
+		const params: any = {};
+		if (performAs) {
+			params.perform_as = performAs;
+		}
+		await this.makeRequest('DELETE', `opportunities/${opportunityId}/panels/${panelId}`, params);
 	}
 
 	// Note: The following methods are placeholders for functionality that may not be 

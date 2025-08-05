@@ -1,4 +1,4 @@
-import { LeverClient } from '../lever/client';
+import type { LeverClient } from '../lever/client';
 
 /**
  * Resolves stage identifiers (names or IDs) to stage IDs
@@ -20,15 +20,15 @@ export async function resolveStageIdentifier(
     const stages = await client.getStages();
     
     // Create a map of lowercase stage names to IDs for efficient lookup
-    const stageMap = new Map(
-        stages.data.map(s => [s.text.toLowerCase(), s.id])
+    const stageMap = new Map<string, string>(
+        stages.data.map((s: any) => [s.text.toLowerCase(), s.id])
     );
     
     // Ensure we're working with an array
     const identifiers = Array.isArray(identifier) ? identifier : [identifier];
     
     // Resolve each identifier
-    return identifiers.map(id => {
+    return identifiers.map((id: string): string => {
         // If it's already a UUID (36 chars with hyphens), return it as-is
         if (id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
             return id;
@@ -81,8 +81,8 @@ export async function getStageIdToNameMap(
     client: LeverClient
 ): Promise<Map<string, string>> {
     const stages = await client.getStages();
-    return new Map(
-        stages.data.map(s => [s.id, s.text])
+    return new Map<string, string>(
+        stages.data.map((s: any) => [s.id, s.text])
     );
 }
 
@@ -97,7 +97,7 @@ export async function getStageNameToIdMap(
     client: LeverClient
 ): Promise<Map<string, string>> {
     const stages = await client.getStages();
-    return new Map(
-        stages.data.map(s => [s.text.toLowerCase(), s.id])
+    return new Map<string, string>(
+        stages.data.map((s: any) => [s.text.toLowerCase(), s.id])
     );
 }

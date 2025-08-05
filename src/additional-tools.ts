@@ -749,7 +749,7 @@ export function registerAdditionalTools(
 		},
 		async (args) => {
 			try {
-				let allCandidates: any[] = [];
+				const allCandidates: any[] = [];
 				let offset = args.offset;
 				let hasNext = true;
 				let totalFetched = 0;
@@ -818,7 +818,8 @@ export function registerAdditionalTools(
 						if (args.include_interviews) {
 							try {
 								// Get interview data for this candidate
-								const interviews = await client.getOpportunityInterviews(candidate.id);
+								const interviewsResponse = await client.getOpportunityInterviews(candidate.id);
+								const interviews = interviewsResponse.data || [];
 								candidateData.interview_count = interviews.length;
 								candidateData.interviews = interviews.map((interview: any) => ({
 									id: interview.id,
