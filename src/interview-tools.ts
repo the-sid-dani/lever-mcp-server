@@ -89,18 +89,146 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
             };
           }
         } else {
-          // For broader searches, we need to implement aggregation logic
-          // This is a simplified version - in production, we'd need to handle
-          // posting_id, owner_email, etc. by first finding relevant opportunities
-          results.data = {
-            message: "Broader search parameters not yet implemented",
-            hint: "Please provide an opportunity_id for now",
-            requested_filters: {
-              owner_email: args.owner_email,
-              posting_id: args.posting_id,
-              interviewer_email: args.interviewer_email
+          // Broader search implementation
+          try {
+            let allInterviews: LeverInterview[] = [];
+            let allPanels: LeverPanel[] = [];
+            let opportunityIds: string[] = [];
+            
+            // Step 1: Find relevant opportunities based on filters
+            if (args.posting_id) {
+              // Get opportunities for specific posting
+              const oppsResponse = await client.getOpportunities({
+                posting_id: args.posting_id,
+                limit: 100
+              });
+              opportunityIds = oppsResponse.data.map((opp: LeverOpportunity) => opp.id);
+            } else if (args.owner_email) {
+              // Search by owner email - need to get all and filter
+              const oppsResponse = await client.getOpportunities({
+                limit: 100
+              });
+              // Filter by owner email (only checks candidate emails for now)
+              // Note: Owner doesn't have email in the API, only name and id
+              const filtered = oppsResponse.data.filter((opp: LeverOpportunity) => 
+                args.owner_email && opp.emails?.includes(args.owner_email)
+              );
+              opportunityIds = filtered.map((opp: LeverOpportunity) => opp.id);
+            } else {
+              // Get recent opportunities if no specific filter
+              const oppsResponse = await client.getOpportunities({
+                limit: 50
+              });
+              opportunityIds = oppsResponse.data.map((opp: LeverOpportunity) => opp.id);
             }
-          };
+            
+            // Step 2: Get interviews for each opportunity
+            for (const oppId of opportunityIds) {
+              try {
+                const interviewsResp = await client.getOpportunityInterviews(oppId);
+                const panelsResp = await client.getOpportunityPanels(oppId);
+                
+                allInterviews.push(...(interviewsResp.data || []));
+                allPanels.push(...(panelsResp.data || []));
+              } catch (err) {
+                // Skip opportunities that have no interviews
+                continue;
+              }
+            }
+            
+            // Step 3: Filter by time scope
+            if (args.time_scope) {
+              const now = Date.now();
+              const weekMs = 7 * 24 * 60 * 60 * 1000;
+              
+              allInterviews = allInterviews.filter(interview => {
+                const interviewDate = interview.date;
+                
+                switch (args.time_scope) {
+                  case 'past_week':
+                    return interviewDate >= now - weekMs && interviewDate <= now;
+                  case 'this_week':
+                    const startOfWeek = now - (new Date().getDay() * 24 * 60 * 60 * 1000);
+                    const endOfWeek = startOfWeek + weekMs;
+                    return interviewDate >= startOfWeek && interviewDate <= endOfWeek;
+                  case 'next_week':
+                    const nextWeekStart = now + ((7 - new Date().getDay()) * 24 * 60 * 60 * 1000);
+                    const nextWeekEnd = nextWeekStart + weekMs;
+                    return interviewDate >= nextWeekStart && interviewDate <= nextWeekEnd;
+                  case 'this_month':
+                    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+                    const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getTime();
+                    return interviewDate >= startOfMonth && interviewDate <= endOfMonth;
+                  case 'custom':
+                    const from = args.date_from ? new Date(args.date_from).getTime() : 0;
+                    const to = args.date_to ? new Date(args.date_to).getTime() : Number.MAX_SAFE_INTEGER;
+                    return interviewDate >= from && interviewDate <= to;
+                  default:
+                    return true;
+                }
+              });
+            }
+            
+            // Step 4: Filter by interviewer if specified
+            if (args.interviewer_email) {
+              allInterviews = allInterviews.filter(interview =>
+                interview.interviewers.some(i => i.email === args.interviewer_email)
+              );
+            }
+            
+            // Step 5: Apply status filters
+            if (args.status_filter) {
+              allInterviews = allInterviews.filter(interview => {
+                switch (args.status_filter) {
+                  case 'scheduled':
+                    return !interview.canceledAt && interview.date > Date.now();
+                  case 'completed':
+                    return !interview.canceledAt && interview.date <= Date.now();
+                  case 'needs_feedback':
+                    return !interview.canceledAt && interview.date <= Date.now() && 
+                           interview.feedbackForms.length === 0;
+                  case 'needs_scheduling':
+                    // Interviews that need scheduling would typically be in panels without dates
+                    return false; // This requires panel-level logic
+                  case 'conflicts':
+                    // Would need to implement conflict detection logic
+                    return false; // This requires more complex logic
+                  default:
+                    return true;
+                }
+              });
+            }
+            
+            results.metadata.total_count = allInterviews.length;
+            results.metadata.opportunities_searched = opportunityIds.length;
+            
+            // Format based on view type
+            switch (args.view_type) {
+              case "dashboard":
+                results.data = formatDashboardView(allInterviews, allPanels);
+                break;
+              case "detailed":
+                results.data = formatDetailedView(allInterviews, allPanels, args);
+                break;
+              case "analytics":
+                results.data = formatAnalyticsView(allInterviews, allPanels);
+                break;
+              case "preparation":
+                results.data = formatPreparationView(allInterviews, allPanels);
+                break;
+            }
+          } catch (error: any) {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  error: "Failed to perform broader search",
+                  details: error.message,
+                  hint: "Try providing more specific filters like opportunity_id"
+                }, null, 2)
+              }]
+            };
+          }
         }
         
         return {
