@@ -472,19 +472,29 @@ function formatDashboardView(interviews: LeverInterview[], panels: LeverPanel[])
       cancelled_count: cancelled.length,
       total_panels: panels.length
     },
-    upcoming_interviews: upcoming.slice(0, 5).map(i => ({
-      id: i.id,
-      subject: i.subject,
-      date: i.date,
-      duration: i.duration,
-      interviewers: i.interviewers.map(int => int.name).join(", ")
-    })),
-    recent_interviews: past.slice(0, 5).map(i => ({
-      id: i.id,
-      subject: i.subject,
-      date: i.date,
-      has_feedback: i.feedbackForms.length > 0
-    }))
+    upcoming_interviews: upcoming.slice(0, 5).map(i => {
+      const panel = panels.find(p => p.id === i.panel);
+      return {
+        id: i.id,
+        subject: i.subject,
+        date: i.date,
+        duration: i.duration,
+        interviewers: i.interviewers.map(int => int.name).join(", "),
+        scheduled_by: panel?.user || i.user,  // Panel creator or interview creator
+        posting_ids: i.postings
+      };
+    }),
+    recent_interviews: past.slice(0, 5).map(i => {
+      const panel = panels.find(p => p.id === i.panel);
+      return {
+        id: i.id,
+        subject: i.subject,
+        date: i.date,
+        has_feedback: i.feedbackForms.length > 0,
+        scheduled_by: panel?.user || i.user,
+        posting_ids: i.postings
+      };
+    })
   };
 }
 
@@ -507,6 +517,13 @@ function formatDetailedView(interviews: LeverInterview[], panels: LeverPanel[], 
         template_id: interview.feedbackTemplate,
         forms_submitted: interview.feedbackForms.length,
         reminder_setting: interview.feedbackReminder
+      },
+      // Include who created/scheduled the interview
+      scheduled_by: {
+        interview_creator: interview.user,  // User who created this specific interview
+        panel_creator: panel?.user,  // User who created the panel (typically the recruiter)
+        stage: interview.stage,  // Stage where interview belongs
+        posting_ids: interview.postings  // Associated posting IDs
       }
     };
     
@@ -515,7 +532,9 @@ function formatDetailedView(interviews: LeverInterview[], panels: LeverPanel[], 
         panel_id: panel.id,
         panel_note: panel.note,
         externally_managed: panel.externallyManaged,
-        external_url: panel.externalUrl
+        external_url: panel.externalUrl,
+        panel_created_at: new Date(panel.createdAt).toISOString(),
+        panel_stage: panel.stage  // Stage when panel was scheduled
       };
     }
     
