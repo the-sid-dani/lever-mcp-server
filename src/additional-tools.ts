@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "./lever/client";
 import type { LeverOpportunity } from "./types/lever";
+import { resolveSingleStageIdentifier } from "./utils/stage-helpers";
 
 // Helper to format opportunity data
 export function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
@@ -90,13 +91,33 @@ export function registerAdditionalTools(
 	server.tool(
 		"lever_search_candidates",
 		{
-			query: z.string().optional(),
-			stage: z.string().optional(),
+			query: z.string().optional().describe("Search query for name or email"),
+			stage_name: z.string().optional().describe("Stage name (not ID)"),
+			posting_id: z.string().optional().describe("Filter by specific posting"),
 			limit: z.number().default(200),
 			page: z.number().default(1).describe("Page number (1-based)"),
 		},
 		async (args) => {
 			try {
+				// Resolve stage name to ID if provided
+				let stageId: string | undefined;
+				if (args.stage_name) {
+					try {
+						stageId = await resolveSingleStageIdentifier(client, args.stage_name);
+					} catch (error) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										error: `Invalid stage name: ${args.stage_name}. ${error instanceof Error ? error.message : String(error)}`,
+									}),
+								},
+							],
+						};
+					}
+				}
+
 				// Check if query looks like an email
 				let emailFilter: string | undefined;
 				if (args.query && args.query.includes("@")) {
@@ -107,7 +128,8 @@ export function registerAdditionalTools(
 					// Use email search
 					const response = await client.getOpportunities({
 						email: emailFilter,
-						stage_id: args.stage,
+						stage_id: stageId,
+						posting_id: args.posting_id,
 						limit: args.limit,
 					});
 
@@ -141,7 +163,8 @@ export function registerAdditionalTools(
 						allOpportunities.length < maxFetch
 					) {
 						const response = await client.getOpportunities({
-							stage_id: args.stage,
+							stage_id: stageId,
+							posting_id: args.posting_id,
 							limit: 100,
 							offset,
 						});
@@ -202,7 +225,8 @@ export function registerAdditionalTools(
 				} else {
 					// No search criteria, just get candidates
 					const response = await client.getOpportunities({
-						stage_id: args.stage,
+						stage_id: stageId,
+						posting_id: args.posting_id,
 						limit: args.limit,
 					});
 
@@ -238,329 +262,11 @@ export function registerAdditionalTools(
 		},
 	);
 
-	// Quick find by name
-	server.tool(
-		"lever_quick_find_candidate",
-		{
-			name_or_email: z.string(),
-		},
-		async (args) => {
-			try {
-				// If it looks like an email, use email search
-				if (args.name_or_email.includes("@")) {
-					const response = await client.getOpportunities({
-						email: args.name_or_email,
-						limit: 10,
-					});
 
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(
-									{
-										count: response.data.length,
-										search_type: "email",
-										query: args.name_or_email,
-										candidates: response.data.map(formatOpportunity),
-									},
-									null,
-									2,
-								),
-							},
-						],
-					};
-				}
 
-				// Otherwise, do a limited name search
-				const queryLower = args.name_or_email.toLowerCase();
-				const matched: LeverOpportunity[] = [];
-				let offset: string | undefined;
-				let pagesChecked = 0;
-				const maxPages = 3; // Only check first 300 candidates
 
-				while (pagesChecked < maxPages) {
-					const response = await client.getOpportunities({
-						limit: 100,
-						offset,
-					});
 
-					if (!response.data || response.data.length === 0) break;
 
-					// Debug: Log first candidate to see structure
-					if (pagesChecked === 0 && response.data.length > 0) {
-						console.log("DEBUG quick_find: First candidate data:", JSON.stringify(response.data[0]).substring(0, 300));
-					}
-
-					// Quick scan for name matches
-					for (const c of response.data) {
-						// Check if we have valid data
-						if (!c || !c.id) {
-							console.warn("Quick find: Skipping candidate with no ID");
-							continue;
-						}
-						
-						const cName = (c.name || "").toLowerCase();
-						
-						// Debug log for specific names
-						if (cName && queryLower === "michael cox" && cName.includes("michael")) {
-							console.log(`DEBUG: Found Michael - Full candidate:`, JSON.stringify(c).substring(0, 300));
-						}
-
-						if (
-							queryLower &&
-							cName &&
-							(queryLower.includes(cName) || cName.includes(queryLower))
-						) {
-							matched.push(c);
-							if (matched.length >= 5) break; // Return first 5 matches
-						}
-					}
-
-					if (matched.length >= 5) break;
-
-					pagesChecked++;
-					if (!response.hasNext || !response.next) break;
-
-					// Use the next token from the API response
-					offset = response.next;
-				}
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(
-								{
-									count: matched.length,
-									search_type: "quick_name_search",
-									query: args.name_or_email,
-									candidates: matched.map(formatOpportunity),
-									note: `Quick search checked first ${pagesChecked * 100} candidates. For comprehensive search, use email if available.`,
-								},
-								null,
-								2,
-							),
-						},
-					],
-				};
-			} catch (error) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						},
-					],
-				};
-			}
-		},
-	);
-
-	// Find candidates in specific posting by name
-	server.tool(
-		"lever_find_candidate_in_posting",
-		{
-			name: z.string(),
-			posting_id: z.string(),
-			stage: z.string().optional(),
-		},
-		async (args) => {
-			try {
-				const nameLower = args.name.toLowerCase();
-				const matched: LeverOpportunity[] = [];
-				let offset: string | undefined;
-				let totalChecked = 0;
-
-				// Search with posting filter - much more targeted
-				while (totalChecked < 1000) {
-					// Can check more when filtered by posting
-					const response = await client.getOpportunities({
-						posting_id: args.posting_id,
-						stage_id: args.stage,
-						limit: 100,
-						offset,
-					});
-
-					if (!response.data || response.data.length === 0) break;
-
-					totalChecked += response.data.length;
-
-					// Check each candidate with flexible matching
-					for (const c of response.data) {
-						const cName = (c.name || "").toLowerCase();
-						// More flexible matching - split name into parts
-						const nameParts = nameLower.split(" ");
-						if (
-							nameParts.some((part) => cName.includes(part)) ||
-							nameLower.includes(cName) ||
-							cName.includes(nameLower)
-						) {
-							matched.push(c);
-						}
-					}
-
-					if (!response.hasNext || !response.next) break;
-
-					// Use the next token from the API response
-					offset = response.next;
-				}
-
-				const result: any = {
-					count: matched.length,
-					posting_id: args.posting_id,
-					total_checked: totalChecked,
-					query: args.name,
-					candidates: matched.map(formatOpportunity),
-				};
-
-				if (matched.length === 0 && totalChecked > 0) {
-					result.note = `No matches found for '${args.name}' among ${totalChecked} candidates in this posting`;
-				}
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(result, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						},
-					],
-				};
-			}
-		},
-	);
-
-	// Find internal referrals for a role
-	server.tool(
-		"lever_find_internal_referrals_for_role",
-		{
-			posting_id: z.string(),
-			limit: z.number().default(100),
-		},
-		async (args) => {
-			try {
-				// First get the posting details
-				const postingsResponse = await client.getPostings("published", 100);
-				const postings = postingsResponse.data || [];
-
-				let targetPosting: any = null;
-				for (const posting of postings) {
-					if (posting.id === args.posting_id) {
-						targetPosting = posting;
-						break;
-					}
-				}
-
-				if (!targetPosting) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									error: `Posting ${args.posting_id} not found`,
-								}),
-							},
-						],
-					};
-				}
-
-				const postingTitle = targetPosting.text || "";
-				// Access team from categories object as per API docs
-				const postingTeam = targetPosting.categories?.team || "";
-
-				// Search for candidates who might be good referral sources
-				// Fetch all candidates with limit
-				const response = await client.getOpportunities({
-					limit: args.limit * 2, // Fetch more to filter
-				});
-
-				const candidates = response.data || [];
-
-				// Filter for likely employees who could refer
-				const potentialReferrers: any[] = [];
-
-				for (const candidate of candidates) {
-					const tags = (candidate.tags || []).map((t: string) =>
-						t.toLowerCase(),
-					);
-					const headline = (candidate.headline || "").toLowerCase();
-
-					// Check if they're marked as internal/employee
-					const isInternal =
-						tags.includes("employee") ||
-						tags.includes("internal") ||
-						tags.some((tag) => tag.includes("referral")) ||
-						headline.includes("current");
-
-					// Check if they're in a related team/role
-					const isRelated =
-						(postingTeam && headline.includes(postingTeam.toLowerCase())) ||
-						(postingTeam &&
-							tags.some((tag) => tag.includes(postingTeam.toLowerCase()))) ||
-						postingTitle
-							.toLowerCase()
-							.split(" ")
-							.some(
-								(keyword: string) =>
-									keyword.length > 3 && headline.includes(keyword),
-							);
-
-					if (isInternal || isRelated) {
-						potentialReferrers.push({
-							...candidate,
-							referral_relevance: isInternal ? "internal" : "related",
-						});
-					}
-				}
-
-				// Limit results
-				const limitedReferrers = potentialReferrers.slice(0, args.limit);
-
-				const results = {
-					count: limitedReferrers.length,
-					role: postingTitle,
-					team: postingTeam,
-					potential_referrers: limitedReferrers.map((c) => ({
-						...formatOpportunity(c),
-						relevance: c.referral_relevance || "unknown",
-					})),
-				};
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(results, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						},
-					],
-				};
-			}
-		},
-	);
 
 	// List files for a candidate
 	server.tool(
@@ -706,135 +412,11 @@ export function registerAdditionalTools(
 		},
 	);
 
-	// Get specific application details
-	server.tool(
-		"lever_get_application",
-		{
-			opportunity_id: z.string(),
-			application_id: z.string(),
-		},
-		async (args) => {
-			try {
-				// Get application details
-				const application = await client.getApplication(
-					args.opportunity_id,
-					args.application_id,
-				);
 
-				// Get candidate info for context
-				const oppResponse = await client.getOpportunity(args.opportunity_id);
-				const opportunity = oppResponse.data;
-
-				const result = {
-					candidate: opportunity.name || "Unknown",
-					application: {
-						id: application.id || "",
-						posting: {
-							id: application.posting?.id || "",
-							title: application.posting?.text || "Unknown",
-							team: application.posting?.team?.text || "Unknown",
-						},
-						status: application.status || "Unknown",
-						created_at: application.createdAt
-							? new Date(application.createdAt)
-									.toISOString()
-									.replace("T", " ")
-									.substring(0, 16)
-							: "Unknown",
-						created_by: application.user?.name || "System",
-						type: application.type || "Unknown",
-						posting_owner: application.postingOwner?.name || "Unknown",
-					},
-				};
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(result, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						},
-					],
-				};
-			}
-		},
-	);
 
 	// NEW TOOLS: Following the implementation plan
 
-	// Tool 1: Move candidate to stage
-	server.tool(
-		"lever_move_candidate_to_stage",
-		{
-			opportunity_id: z.string().describe("The candidate's opportunity ID"),
-			stage_id: z.string().describe("The target stage ID (use lever_get_stages to find valid IDs)"),
-			perform_as: z.string().optional().describe("Optional: User ID to perform this action on behalf of"),
-		},
-		async (args) => {
-			try {
-				// Get candidate info first for context
-				const oppResponse = await client.getOpportunity(args.opportunity_id);
-				const opportunity = oppResponse.data;
 
-				// Get current stage for comparison
-				const currentStage = opportunity.stage;
-
-				// Update the stage
-				const updateResponse = await client.updateOpportunityStage(
-					args.opportunity_id,
-					args.stage_id,
-					args.perform_as,
-				);
-
-				// Get updated candidate info
-				const updatedOppResponse = await client.getOpportunity(args.opportunity_id);
-				const updatedOpportunity = updatedOppResponse.data;
-
-				const result = {
-					success: true,
-					candidate: opportunity.name || "Unknown",
-					stage_change: {
-						from: typeof currentStage === "object" ? currentStage.text : String(currentStage || "Unknown"),
-						to: typeof updatedOpportunity.stage === "object" ? updatedOpportunity.stage.text : String(updatedOpportunity.stage || "Unknown"),
-						stage_id: args.stage_id,
-					},
-					performed_by: args.perform_as || "API User",
-					timestamp: new Date().toISOString(),
-				};
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(result, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-								note: "Make sure the stage_id is valid. Use lever_get_stages to see available stages.",
-							}),
-						},
-					],
-				};
-			}
-		},
-	);
 
 	// Tool 2: List requisitions
 	server.tool(
@@ -1151,403 +733,6 @@ export function registerAdditionalTools(
 		},
 	);
 
-	// MASTER TOOL: Comprehensive Recruiter Dashboard
-	server.tool(
-		"lever_recruiter_dashboard",
-		{
-			owner_name: z.string().optional().describe("Name of the posting owner/recruiter (e.g., 'ciarli bolden') - use owner_id if available for better performance"),
-			owner_id: z.string().optional().describe("Owner/recruiter ID (more reliable than name) - get this from lever_list_open_roles"),
-			include_interviews: z.boolean().default(true).describe("Include upcoming interview data (limited to stay under API limits)"),
-			days_ahead: z.number().default(7).describe("How many days ahead to look for interviews"),
-			stage_filter: z.string().optional().describe("Optional: Filter candidates by specific stage"),
-			max_candidates_per_posting: z.number().default(100).describe("Max candidates per posting to prevent subrequest limit (default: 100, use -1 for ALL)"),
-			// New pagination parameters
-			page: z.number().default(1).describe("Page number for posting pagination (1-based)"),
-			postings_per_page: z.number().default(5).describe("Number of postings per page (default: 5, max: 10)"),
-			summary_mode: z.boolean().default(true).describe("Return summary statistics instead of full candidate details"),
-			include_candidate_details: z.string().optional().describe("Comma-separated posting IDs to include full candidate details for specific postings only"),
-			focus_interviews_only: z.boolean().default(false).describe("Only include candidates with upcoming interviews"),
-		},
-		async (args) => {
-			try {
-				// Validate input
-				if (!args.owner_name && !args.owner_id) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									error: "Either owner_name or owner_id is required",
-									suggestion: "Use lever_list_open_roles to get owner IDs for better performance",
-								}, null, 2),
-							},
-						],
-					};
-				}
-
-				// Performance tracking
-				const startTime = Date.now();
-				let postingsResponse;
-				let subrequestCount = 0; // Track API calls to stay under 1000 (paid plan)
-
-				// Get stage mapping to convert IDs to names
-				let stageMap: Record<string, string> = {};
-				try {
-					const stagesResponse = await client.getStages();
-					subrequestCount++;
-					if (stagesResponse.data) {
-						for (const stage of stagesResponse.data) {
-							stageMap[stage.id] = stage.text;
-						}
-					}
-				} catch (error) {
-					console.warn("Could not fetch stages for mapping:", error);
-				}
-
-				// Get postings by ID (preferred) or name
-				if (args.owner_id) {
-					// More efficient: Get multiple batches of postings and filter by owner ID
-					// Expand both owner and hiringManager to get names
-					const allPostings: any[] = [];
-					let offset: string | undefined;
-					let batchesFetched = 0;
-					const maxBatches = 20; // Fetch up to 2000 postings (20 batches of 100)
-					
-					// Fetch multiple batches to increase coverage
-					while (batchesFetched < maxBatches && subrequestCount < 900) {
-						const batchResponse = await client.getPostings("published", 100, offset, ["owner", "hiringManager"]);
-						subrequestCount++;
-						
-						if (batchResponse.data && batchResponse.data.length > 0) {
-							allPostings.push(...batchResponse.data);
-						}
-						
-						batchesFetched++;
-						
-						// Stop if no more data
-						if (!batchResponse.hasNext || !batchResponse.next) {
-							break;
-						}
-						
-						offset = batchResponse.next;
-					}
-					
-					// Filter by owner ID
-					const filteredPostings = allPostings.filter(posting => {
-						if (typeof posting.owner === 'object' && posting.owner?.id) {
-							return posting.owner.id === args.owner_id;
-						}
-						return false;
-					});
-					
-					postingsResponse = {
-						data: filteredPostings,
-						hasNext: false,
-						next: undefined,
-					};
-				} else {
-					// Fallback: Search by name (less efficient)
-					// getPostingsByOwner already expands owner and hiringManager internally
-					postingsResponse = await client.getPostingsByOwner(args.owner_name!);
-					subrequestCount++;
-				}
-				
-				if (postingsResponse.data.length === 0) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									recruiter: args.owner_name || args.owner_id,
-									message: "No postings found for this recruiter",
-									suggestion: args.owner_name ? "Try using owner_id instead of owner_name, or check spelling" : "Check the owner_id is correct",
-								}, null, 2),
-							},
-						],
-					};
-				}
-
-				// Apply pagination to postings
-				const allPostings = postingsResponse.data;
-				const totalPostings = allPostings.length;
-				const page = Math.max(1, args.page);
-				const postingsPerPage = Math.min(Math.max(1, args.postings_per_page), 10); // Cap at 10
-				const startIndex = (page - 1) * postingsPerPage;
-				const endIndex = startIndex + postingsPerPage;
-				const paginatedPostings = allPostings.slice(startIndex, endIndex);
-				const totalPages = Math.ceil(totalPostings / postingsPerPage);
-				const hasMorePages = page < totalPages;
-
-				// Parse which postings need detailed candidate data
-				const detailedPostingIds = args.include_candidate_details 
-					? args.include_candidate_details.split(',').map(id => id.trim())
-					: [];
-
-				const postingSummaries = [];
-				let totalCandidates = 0;
-				let totalInterviewsScheduled = 0;
-				let stageDistribution: Record<string, number> = {};
-				let candidatesWithInterviewsList: any[] = [];
-
-				// Process each posting on current page
-				for (const posting of paginatedPostings) {
-					// Stop if we're getting close to the limit
-					if (subrequestCount >= 900) {
-						console.warn(`Stopping early to avoid subrequest limit. Processed ${postingSummaries.length} postings.`);
-						break;
-					}
-
-					// Determine how many candidates to fetch
-					let candidateLimit = args.max_candidates_per_posting;
-					let allPostingCandidates: any[] = [];
-					let offset: string | undefined;
-					
-					// If we want ALL candidates (-1) or need accurate counts, fetch all
-					if (candidateLimit === -1 || args.focus_interviews_only || !args.summary_mode) {
-						// Fetch ALL candidates for this posting in batches
-						while (subrequestCount < 900) {
-							const batchResponse = await client.getOpportunities({
-								posting_id: posting.id,
-								stage_id: args.stage_filter,
-								limit: 100,
-								offset: offset,
-							});
-							subrequestCount++;
-							
-							if (!batchResponse.data || batchResponse.data.length === 0) break;
-							allPostingCandidates.push(...batchResponse.data);
-							
-							if (!batchResponse.hasNext || !batchResponse.next) break;
-							offset = batchResponse.next;
-						}
-					} else {
-						// Just fetch the requested limit
-						const candidatesResponse = await client.getOpportunities({
-							posting_id: posting.id,
-							stage_id: args.stage_filter,
-							limit: candidateLimit,
-						});
-						subrequestCount++;
-						allPostingCandidates = candidatesResponse.data || [];
-					}
-
-					const candidates = allPostingCandidates;
-					totalCandidates += candidates.length;
-
-					// Track stage distribution with proper stage names
-					for (const candidate of candidates) {
-						// Get stage name from map or use the stage value as-is
-						let stageName = "Unknown Stage";
-						if (typeof candidate.stage === 'object' && candidate.stage?.text) {
-							stageName = candidate.stage.text;
-						} else if (typeof candidate.stage === 'string' && stageMap[candidate.stage]) {
-							stageName = stageMap[candidate.stage];
-						} else if (candidate.stage) {
-							stageName = String(candidate.stage);
-						}
-						stageDistribution[stageName] = (stageDistribution[stageName] || 0) + 1;
-					}
-
-					// Build posting summary
-					const postingSummary: any = {
-						id: posting.id,
-						title: posting.text || "Unknown",
-						location: posting.categories?.location || "Unknown",
-						team: posting.categories?.team || "Unknown",
-						total_candidates: candidates.length,
-						stage_breakdown: {} as Record<string, number>,
-					};
-
-					// Calculate stage breakdown for this posting
-					const postingStages: Record<string, number> = {};
-					for (const candidate of candidates) {
-						// Get stage name from map or use the stage value as-is
-						let stageName = "Unknown Stage";
-						if (typeof candidate.stage === 'object' && candidate.stage?.text) {
-							stageName = candidate.stage.text;
-						} else if (typeof candidate.stage === 'string' && stageMap[candidate.stage]) {
-							stageName = stageMap[candidate.stage];
-						} else if (candidate.stage) {
-							stageName = String(candidate.stage);
-						}
-						postingStages[stageName] = (postingStages[stageName] || 0) + 1;
-					}
-					postingSummary.stage_breakdown = postingStages;
-
-					// Interview tracking
-					let candidatesWithInterviews: any[] = [];
-					
-					if (args.include_interviews && subrequestCount < 900) {
-						// For interview focus mode, check ALL candidates
-						const candidatesToCheck = args.focus_interviews_only ? candidates : candidates.slice(0, 20);
-						
-						for (const candidate of candidatesToCheck) {
-							if (subrequestCount >= 900) break;
-							
-							try {
-								const interviews = await client.getOpportunityInterviews(candidate.id);
-								subrequestCount++;
-
-								const upcomingInterviews = (interviews.data || []).filter((interview: any) => {
-									if (!interview.date) return false;
-									const interviewDate = new Date(interview.date);
-									const now = new Date();
-									const cutoff = new Date(now.getTime() + (args.days_ahead * 24 * 60 * 60 * 1000));
-									return interviewDate >= now && interviewDate <= cutoff;
-								});
-
-								if (upcomingInterviews.length > 0) {
-									totalInterviewsScheduled += upcomingInterviews.length;
-									const candidateWithInterview = {
-										// Format with proper posting name
-										id: candidate.id,
-										name: candidate.name || "Unknown",
-										email: candidate.emails?.[0] || "N/A",
-										stage: typeof candidate.stage === 'object' && candidate.stage?.text 
-											? candidate.stage.text 
-											: (typeof candidate.stage === 'string' && stageMap[candidate.stage] 
-												? stageMap[candidate.stage] 
-												: (candidate.stage || 'Unknown Stage')),
-										posting: posting.text || "Unknown",
-										location: candidate.location || "Unknown",
-										organizations: candidate.headline || "",
-										created: candidate.createdAt
-											? new Date(candidate.createdAt).toISOString().split("T")[0]
-											: "Unknown",
-										upcoming_interviews: upcomingInterviews.map((interview: any) => ({
-											id: interview.id,
-											subject: interview.subject || "Interview",
-											date: interview.date ? new Date(interview.date).toISOString() : "Unknown",
-											interviewers: interview.interviewers?.map((i: any) => i.name || i.email || "Unknown") || [],
-											location: interview.location || "Not specified",
-											duration: interview.duration || "Unknown",
-										})),
-									};
-									candidatesWithInterviews.push(candidateWithInterview);
-									candidatesWithInterviewsList.push(candidateWithInterview);
-								}
-							} catch (error) {
-								// Continue if interview data not available
-							}
-						}
-					}
-					
-					// Add interview data to posting summary
-					if (candidatesWithInterviews.length > 0) {
-						postingSummary.candidates_with_interviews = candidatesWithInterviews;
-						postingSummary.interview_count = candidatesWithInterviews.reduce((sum, c) => sum + c.upcoming_interviews.length, 0);
-					} else {
-						postingSummary.interview_count = 0;
-					}
-
-					// Only include full candidate details if requested for this posting
-					if (!args.summary_mode || detailedPostingIds.includes(posting.id)) {
-						// Format candidates with proper posting name
-						postingSummary.candidates = candidates.slice(0, args.max_candidates_per_posting > 0 ? args.max_candidates_per_posting : undefined).map(c => ({
-							id: c.id || "",
-							name: c.name || "Unknown",
-							email: c.emails?.[0] || "N/A",
-							stage: typeof c.stage === 'object' && c.stage?.text 
-								? c.stage.text 
-								: (typeof c.stage === 'string' && stageMap[c.stage] 
-									? stageMap[c.stage] 
-									: (c.stage || 'Unknown Stage')),
-							posting: posting.text || "Unknown", // Use posting name, not "Unknown"
-							location: c.location || "Unknown",
-							organizations: c.headline || "",
-							created: c.createdAt
-								? new Date(c.createdAt).toISOString().split("T")[0]
-								: "Unknown",
-						}));
-					}
-
-					// Add note about data completeness
-					if (candidateLimit > 0 && candidates.length >= candidateLimit && candidateLimit !== -1) {
-						postingSummary.data_note = `Showing first ${candidateLimit} candidates. Use max_candidates_per_posting: -1 to fetch all.`;
-					}
-
-					postingSummaries.push(postingSummary);
-				}
-
-				// Build optimized response
-				const dashboardSummary: any = {
-					// Metadata
-					recruiter: args.owner_name || args.owner_id,
-					generated_at: new Date().toISOString(),
-					execution_time_ms: Date.now() - startTime,
-					
-					// Pagination info
-					pagination: {
-						current_page: page,
-						total_pages: totalPages,
-						postings_per_page: postingsPerPage,
-						total_postings: totalPostings,
-						has_next_page: hasMorePages,
-						next_page: hasMorePages ? page + 1 : null,
-					},
-					
-					// Summary statistics
-					summary: {
-						postings_on_page: postingSummaries.length,
-						total_candidates_on_page: totalCandidates,
-						total_interviews_scheduled: totalInterviewsScheduled,
-						stage_distribution: stageDistribution,
-						display_mode: args.summary_mode ? "summary" : "detailed",
-					},
-					
-					// Performance metrics
-					performance: {
-											api_calls_used: subrequestCount,
-					subrequest_limit_reached: subrequestCount >= 900,
-						used_owner_id: !!args.owner_id,
-					},
-					
-					// Interview focus section
-					interview_summary: args.include_interviews ? {
-						total_candidates_with_interviews: candidatesWithInterviewsList.length,
-						total_interviews_in_next_days: totalInterviewsScheduled,
-						days_ahead: args.days_ahead,
-						candidates_with_upcoming_interviews: args.focus_interviews_only ? candidatesWithInterviewsList : candidatesWithInterviewsList.slice(0, 10),
-					} : null,
-					
-					// Posting data (summary or detailed based on mode)
-					postings: postingSummaries,
-				};
-
-				// Add recommendations
-				if (args.summary_mode) {
-					dashboardSummary.recommendations = {
-						view_details: "To see full candidate details for specific postings, use include_candidate_details parameter with posting IDs",
-						get_all_candidates: "Use max_candidates_per_posting: -1 to fetch ALL candidates (may hit API limits)",
-						focus_interviews: "Use focus_interviews_only: true to only see candidates with upcoming interviews",
-					};
-				}
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(dashboardSummary, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-								recruiter: args.owner_name || args.owner_id,
-								note: "Make sure the recruiter name is spelled correctly. Try using partial names like 'ciarli' instead of full names.",
-							}),
-						},
-					],
-				};
-			}
-		},
-	);
-
 	// Tool 12: Search archived candidates with interview data
 	server.tool(
 		"lever_search_archived_candidates",
@@ -1706,5 +891,94 @@ export function registerAdditionalTools(
 				};
 			}
 		},
+	);
+
+	// Consolidated update tool for stage, owner, and tags
+	server.tool(
+		"lever_update_candidate",
+		{
+			opportunity_id: z.string().describe("The candidate's opportunity ID"),
+			stage_id: z.string().optional().describe("Move to this stage ID"),
+			stage_name: z.string().optional().describe("Move to stage with this name"),
+			owner_id: z.string().optional().describe("Assign to this user"),
+			add_tags: z.array(z.string()).optional().describe("Tags to add"),
+			remove_tags: z.array(z.string()).optional().describe("Tags to remove"),
+		},
+		async (args) => {
+			try {
+				const updates: any = {};
+				
+				// Handle stage update by name
+				if (args.stage_name && !args.stage_id) {
+					const stages = await client.getStages();
+					const stage = stages.data.find((s: any) => 
+						s.text.toLowerCase().includes(args.stage_name!.toLowerCase())
+					);
+					if (stage) {
+						args.stage_id = stage.id;
+					} else {
+						throw new Error(`Stage "${args.stage_name}" not found`);
+					}
+				}
+				
+				// Perform updates
+				const results = [];
+				
+				if (args.stage_id) {
+					await client.updateOpportunityStage(args.opportunity_id, args.stage_id);
+					results.push({ action: "stage_updated", stage_id: args.stage_id });
+				}
+				
+				if (args.owner_id) {
+					// Note: This would need a new method in LeverClient
+					// await client.updateOpportunityOwner(args.opportunity_id, args.owner_id);
+					results.push({ action: "owner_updated", owner_id: args.owner_id, note: "Owner update not yet implemented in LeverClient" });
+				}
+				
+				if (args.add_tags || args.remove_tags) {
+					// Handle tag updates
+					if (args.add_tags && args.add_tags.length > 0) {
+						await client.addCandidateTags(args.opportunity_id, args.add_tags);
+					}
+					if (args.remove_tags && args.remove_tags.length > 0) {
+						await client.removeCandidateTags(args.opportunity_id, args.remove_tags);
+					}
+					results.push({ 
+						action: "tags_updated", 
+						added: args.add_tags || [],
+						removed: args.remove_tags || []
+					});
+				}
+				
+				// Get updated candidate info
+				const opportunityResponse = await client.getOpportunity(args.opportunity_id);
+				const opportunity = opportunityResponse.data;
+				
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({
+							success: true,
+							opportunity_id: args.opportunity_id,
+							candidate_name: opportunity.name || "Unknown",
+							current_stage: typeof opportunity.stage === 'object' && opportunity.stage 
+								? opportunity.stage.text 
+								: "Unknown",
+							updates: results
+						}, null, 2)
+					}]
+				};
+			} catch (error) {
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({
+							error: error instanceof Error ? error.message : String(error),
+							opportunity_id: args.opportunity_id
+						})
+					}]
+				};
+			}
+		}
 	);
 }

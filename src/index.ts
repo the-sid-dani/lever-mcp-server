@@ -4,6 +4,7 @@ import { z } from "zod";
 import { LeverClient } from "./lever/client";
 import type { LeverOpportunity, LeverPosting } from "./types/lever";
 import { registerAdditionalTools } from "./additional-tools";
+import { resolveStageIdentifier } from "./utils/stage-helpers";
 
 // Environment interface
 interface Env {
@@ -290,6 +291,15 @@ export class LeverMCP extends McpAgent {
 				posting_id: z.string().optional(),
 				limit: z.number().default(50).describe("Results per page (recommended: 20-50 for broad searches)"),
 				page: z.number().default(1).describe("Page number (1-based)"),
+				// New enhanced parameters
+				stages: z.array(z.string()).optional().describe("Stage names to filter by"),
+				stage_contains: z.string().optional().describe("Find stages containing this text"),
+				name: z.string().optional().describe("Candidate name search"),
+				email: z.string().optional().describe("Exact email match"),
+				current_company_only: z.boolean().optional().default(false),
+				archived: z.boolean().optional().default(false).describe("Include archived candidates"),
+				created_after: z.string().optional().describe("Filter by creation date (ISO format)"),
+				mode: z.enum(["comprehensive", "quick"]).default("comprehensive").describe("Search mode"),
 			},
 			this.wrapToolWithTrace("lever_advanced_search", async (args) => {
 				try {
@@ -307,12 +317,43 @@ export class LeverMCP extends McpAgent {
 						? args.tags.split(",").map((t: string) => t.trim().toLowerCase())
 						: [];
 
+					// Parse new enhanced parameters
+					const stageList = args.stages || [];
+					const nameSearch = args.name?.toLowerCase();
+					const emailSearch = args.email?.toLowerCase();
+
+					// Resolve stage names to IDs if needed
+					let stageIds: string[] = [];
+					if (stageList.length > 0) {
+						try {
+							stageIds = await resolveStageIdentifier(this.client, stageList);
+						} catch (error) {
+							console.warn("Failed to resolve some stage names:", error);
+						}
+					}
+
+					// Handle stage_contains by getting all stages
+					let stageContainsIds: string[] = [];
+					if (args.stage_contains) {
+						try {
+							const stages = await this.client.getStages();
+							stageContainsIds = stages.data
+								.filter((s: any) => s.text.toLowerCase().includes(args.stage_contains!.toLowerCase()))
+								.map((s: any) => s.id);
+						} catch (error) {
+							console.warn("Failed to fetch stages for stage_contains:", error);
+						}
+					}
+
 					const allCandidates: LeverOpportunity[] = [];
 					let offset: string | undefined;
 					// Updated for Cloudflare's paid plan with 1000 subrequest limit
 					// Each API call counts as a subrequest, and we fetch 100 candidates per call
 					// We can make up to 900 API calls (leaving 100 for other operations)
-					const maxFetch = Math.min(args.limit * 10, 10000, 90000); // Max 90,000 candidates = 900 API calls
+					// In quick mode, limit to 5 batches (500 candidates max)
+					const maxFetch = args.mode === "quick" 
+						? Math.min(args.limit * 3, 500) 
+						: Math.min(args.limit * 10, 10000, 90000); // Max 90,000 candidates = 900 API calls
 					let totalMatches = 0; // Track total matches for pagination info
 					let totalScanned = 0; // Track how many candidates we've looked at
 					let totalFetched = 0; // Track how many candidates we fetched from API
@@ -336,13 +377,32 @@ export class LeverMCP extends McpAgent {
 							await new Promise((resolve) => setTimeout(resolve, 300)); // 300ms delay = ~3 requests/second
 						}
 
-						const response = await this.client.getOpportunities({
-							stage_id: args.stage,
-							posting_id: args.posting_id,
-							tag: args.tags ? args.tags.split(",")[0] : undefined, // API only supports single tag
+						// If searching by email, use email parameter directly
+						const searchParams: any = {
 							limit: 100,
 							offset,
-						});
+						};
+
+						// Email search is most efficient when done through API
+						if (emailSearch) {
+							searchParams.email = args.email;
+						}
+
+						// Handle stage filtering - prefer new stages array over single stage
+						if (stageIds.length > 0) {
+							// API only supports single stage_id, use first one
+							searchParams.stage_id = stageIds[0];
+						} else if (stageContainsIds.length > 0) {
+							searchParams.stage_id = stageContainsIds[0];
+						} else if (args.stage) {
+							searchParams.stage_id = args.stage;
+						}
+
+						if (args.posting_id) searchParams.posting_id = args.posting_id;
+						if (args.tags) searchParams.tag = args.tags.split(",")[0]; // API only supports single tag
+						if (args.archived !== undefined) searchParams.archived = args.archived;
+
+						const response = await this.client.getOpportunities(searchParams);
 
 						apiCallCount++; // Increment API call counter
 						
@@ -426,15 +486,58 @@ export class LeverMCP extends McpAgent {
 								cAllText += ` ${cResume}`;
 							}
 
-							// Check each criteria
+							// Check new enhanced criteria first (early filtering)
+							// Name match
+							if (nameSearch && !cName.includes(nameSearch)) {
+								return false;
+							}
+
+							// Email match (exact match if not using API email search)
+							if (emailSearch && !searchParams.email && !cEmailsLower.includes(emailSearch)) {
+								return false;
+							}
+
+							// Stage filtering (handle multiple stages with OR logic)
+							if (stageIds.length > 1 || stageContainsIds.length > 1) {
+								const candidateStageId = typeof c.stage === 'object' && c.stage ? c.stage.id : c.stage;
+								const allStageIds = [...stageIds, ...stageContainsIds];
+								if (!allStageIds.includes(candidateStageId as string)) {
+									return false;
+								}
+							}
+
+							// Archived filter
+							if (args.archived === false && c.archived) {
+								return false;
+							}
+
+							// Created after filter
+							if (args.created_after && c.createdAt) {
+								const createdDate = new Date(c.createdAt);
+								const filterDate = new Date(args.created_after);
+								if (createdDate < filterDate) {
+									return false;
+								}
+							}
+
+							// Check each existing criteria
 							// Company match: check in headline (primary) or organizations
-							const companyMatch =
-								!companyList.length ||
-								companyList.some(
-									(comp: string) =>
-										cHeadline.includes(comp) ||
-										cOrganizationsLower.some((org: string) => org.includes(comp)),
-								);
+							let companyMatch = !companyList.length;
+							if (companyList.length > 0) {
+								// If current_company_only is true, only check the first company in headline
+								if (args.current_company_only) {
+									// Extract current company (first one in headline)
+									const currentCompany = cHeadline.split(',')[0].trim();
+									companyMatch = companyList.some((comp: string) => currentCompany.includes(comp));
+								} else {
+									// Original logic - check all companies
+									companyMatch = companyList.some(
+										(comp: string) =>
+											cHeadline.includes(comp) ||
+											cOrganizationsLower.some((org: string) => org.includes(comp))
+									);
+								}
+							}
 
 							// Skills match: ANY skill match (OR logic)
 							const skillMatch =
@@ -524,8 +627,16 @@ export class LeverMCP extends McpAgent {
 											skills: args.skills,
 											locations: args.locations,
 											stage: args.stage,
+											stages: args.stages,
+											stage_contains: args.stage_contains,
+											name: args.name,
+											email: args.email,
+											current_company_only: args.current_company_only,
+											archived: args.archived,
+											created_after: args.created_after,
 											tags: args.tags,
 											posting: args.posting_id,
+											mode: args.mode,
 										},
 						search_stats: {
 							candidates_scanned: totalScanned,
@@ -580,8 +691,16 @@ export class LeverMCP extends McpAgent {
 											skills: args.skills,
 											locations: args.locations,
 											stage: args.stage,
+											stages: args.stages,
+											stage_contains: args.stage_contains,
+											name: args.name,
+											email: args.email,
+											current_company_only: args.current_company_only,
+											archived: args.archived,
+											created_after: args.created_after,
 											tags: args.tags,
 											posting: args.posting_id,
+											mode: args.mode,
 										},
 										candidates: [],
 									},
@@ -595,148 +714,7 @@ export class LeverMCP extends McpAgent {
 			}),
 		);
 
-		// Find by company tool
-		this.server.tool(
-			"lever_find_by_company",
-			{
-				companies: z.string(),
-				current_only: z.boolean().default(false).describe("Filter to only current employees (default: false - searches all work history)"),
-				limit: z.number().default(200),
-				page: z.number().default(1).describe("Page number (1-based)"),
-			},
-			this.wrapToolWithTrace("lever_find_by_company", async (args) => {
-				try {
-					// Parse company list
-					const companyList = args.companies.split(",").map((c: string) => c.trim());
 
-					// Search for candidates from each company
-					const allCandidates: any[] = [];
-					const seenIds = new Set<string>();
-
-					// Fetch candidates and filter by company
-					let offset: string | undefined;
-					let totalFetched = 0;
-					const maxFetch = Math.min(args.limit * 5, 500); // Fetch more to ensure we get enough matches
-
-					while (totalFetched < maxFetch) {
-						const response = await this.client.getOpportunities({
-							limit: 100,
-							offset,
-						});
-
-						const candidates = response.data || [];
-						if (candidates.length === 0) break;
-
-						totalFetched += candidates.length;
-
-						// Filter to ensure company match in headline
-						for (const candidate of candidates) {
-							const headline = (candidate.headline || "").toLowerCase();
-							const tags = (candidate.tags || []).map((t: string) =>
-								t.toLowerCase(),
-							);
-
-							// Check for company match
-							let companyFound = false;
-							let matchedCompany = "";
-
-							for (const company of companyList) {
-								const companyLower = company.toLowerCase();
-
-								if (headline) {
-									// Split headline by comma to get individual companies
-									const headlineCompanies = headline
-										.split(",")
-										.map((c) => c.trim());
-									for (const hc of headlineCompanies) {
-										if (
-											companyLower.includes(hc) ||
-											hc.includes(companyLower)
-										) {
-											companyFound = true;
-											matchedCompany = company;
-											break;
-										}
-									}
-								}
-
-								if (
-									!companyFound &&
-									tags.some((tag) => tag.includes(companyLower))
-								) {
-									companyFound = true;
-									matchedCompany = company;
-								}
-
-								if (companyFound) break;
-							}
-
-							// Add to results if company match found and not duplicate
-							if (companyFound && !seenIds.has(candidate.id)) {
-								seenIds.add(candidate.id);
-								allCandidates.push({
-									...candidate,
-									matched_company: matchedCompany,
-									full_headline: candidate.headline || "",
-								});
-							}
-						}
-
-						// Check if we have enough results
-						if (allCandidates.length >= args.limit) break;
-
-						if (!response.hasNext || !response.next) break;
-
-						// Use the next token from the API response
-						offset = response.next;
-					}
-
-					// Calculate pagination
-					const page = Math.max(1, args.page);
-					const startIndex = (page - 1) * args.limit;
-					const endIndex = startIndex + args.limit;
-					const paginatedCandidates = allCandidates.slice(startIndex, endIndex);
-					const totalPages = Math.ceil(allCandidates.length / args.limit);
-					const hasMore = page < totalPages;
-
-					const results = {
-						count: paginatedCandidates.length,
-						page: page,
-						total_matches: allCandidates.length,
-						total_pages: totalPages,
-						has_more: hasMore,
-						next_page: hasMore ? page + 1 : null,
-						searched_companies: companyList,
-						current_employees_only: args.current_only,
-						candidates: paginatedCandidates.map((c) => ({
-							...formatOpportunity(c),
-							matched_company: c.matched_company || "Unknown",
-							all_organizations: c.full_headline || c.headline || "",
-						})),
-					};
-
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(results, null, 2),
-							},
-						],
-					};
-				} catch (error) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									error: error instanceof Error ? error.message : String(error),
-								}),
-							},
-						],
-					};
-				}
-			}),
-		);
 	}
 
 	private registerCandidateTools() {
@@ -1064,431 +1042,50 @@ export class LeverMCP extends McpAgent {
 			}),
 		);
 
-		// Test connection tool
-		this.server.tool("test_lever_connection", {}, this.wrapToolWithTrace("test_lever_connection", async () => {
-			try {
-				console.log("Testing Lever API connection...");
-				
-				// Try to fetch a small number of opportunities to test the connection
-				const response = await this.client.getOpportunities({
-					limit: 1
-				});
-				
-				console.log("Connection test successful, response:", JSON.stringify(response).slice(0, 200));
-				
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								status: "success",
-								message: "Lever API connection is working",
-								test_results: {
-									api_responded: true,
-									candidates_found: response.data ? response.data.length : 0,
-									has_data: response.data && response.data.length > 0,
-									sample_id: response.data && response.data[0] ? response.data[0].id : null
-								}
-							}, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				console.error("Connection test failed:", error);
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								status: "error",
-								message: "Lever API connection failed",
-								error: error instanceof Error ? error.message : String(error),
-								hint: "Please check your LEVER_API_KEY is correctly set"
-							}, null, 2),
-						},
-					],
-				};
-			}
-		}));
 
-		// Test rate limits tool - verify our rate limiting is working
-		this.server.tool(
-			"test_rate_limits",
-			{
-				requests: z.number().default(20).describe("Number of test requests to make"),
-				concurrent: z.boolean().default(false).describe("Run requests concurrently instead of sequentially"),
-			},
-			this.wrapToolWithTrace("test_rate_limits", async (args) => {
-				const results: any[] = [];
-				const startTime = Date.now();
-				
-				if (args.concurrent) {
-					// Test concurrent requests
-					const promises = [];
-					for (let i = 0; i < args.requests; i++) {
-						promises.push(
-							(async (index) => {
-								const reqStart = Date.now();
-								try {
-									await this.client.getOpportunities({ limit: 1 });
-									return {
-										request: index + 1,
-										success: true,
-										duration: Date.now() - reqStart,
-										timestamp: Date.now() - startTime,
-									};
-								} catch (error) {
-									return {
-										request: index + 1,
-										success: false,
-										error: error instanceof Error ? error.message : String(error),
-										duration: Date.now() - reqStart,
-										timestamp: Date.now() - startTime,
-									};
-								}
-							})(i)
-						);
-					}
-					
-					results.push(...await Promise.all(promises));
-				} else {
-					// Test sequential requests
-					for (let i = 0; i < args.requests; i++) {
-						const reqStart = Date.now();
-						try {
-							await this.client.getOpportunities({ limit: 1 });
-							results.push({
-								request: i + 1,
-								success: true,
-								duration: Date.now() - reqStart,
-								timestamp: Date.now() - startTime,
-							});
-						} catch (error) {
-							results.push({
-								request: i + 1,
-								success: false,
-								error: error instanceof Error ? error.message : String(error),
-								duration: Date.now() - reqStart,
-								timestamp: Date.now() - startTime,
-							});
-						}
-					}
-				}
-				
-				const totalTime = Date.now() - startTime;
-				const successCount = results.filter(r => r.success).length;
-				const failureCount = results.filter(r => !r.success).length;
-				const actualRate = args.requests / (totalTime / 1000);
-				
-				// Calculate average delay between requests
-				const delays = [];
-				for (let i = 1; i < results.length; i++) {
-					delays.push(results[i].timestamp - results[i-1].timestamp);
-				}
-				const avgDelay = delays.length > 0 ? delays.reduce((a, b) => a + b, 0) / delays.length : 0;
-				
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								summary: {
-									total_requests: args.requests,
-									successful: successCount,
-									failed: failureCount,
-									total_time_seconds: Math.round(totalTime / 100) / 10,
-									actual_rate_per_second: Math.round(actualRate * 10) / 10,
-									average_delay_ms: Math.round(avgDelay),
-									execution_mode: args.concurrent ? "concurrent" : "sequential",
-								},
-								rate_limit_status: actualRate > 10 
-									? "⚠️ EXCEEDING LIMIT" 
-									: actualRate > 8 
-										? "⚡ Near limit" 
-										: "✅ Within safe limits",
-								errors: results.filter(r => !r.success),
-								timing_distribution: {
-									min_duration: Math.min(...results.map(r => r.duration)),
-									max_duration: Math.max(...results.map(r => r.duration)),
-									avg_duration: Math.round(results.reduce((sum, r) => sum + r.duration, 0) / results.length),
-								},
-							}, null, 2),
-						},
-					],
-				};
-			}),
-		);
 
-		// Verify API response tool - check what the API actually returns
-		this.server.tool(
-			"verify_api_response",
-			{
-				batches: z.number().default(3).describe("Number of API batches to fetch (max 5)"),
-			},
-			this.wrapToolWithTrace("verify_api_response", async (args) => {
-				const results: any[] = [];
-				let offset: string | undefined;
-				const batchCount = Math.min(args.batches, 5); // Limit to 5 batches
-				
-				for (let i = 0; i < batchCount; i++) {
-					const response = await this.client.getOpportunities({
-						limit: 100,
-						offset,
-					});
-					
-					const batchResult = {
-						batch: i + 1,
-						requested_limit: 100,
-						actual_count: response.data ? response.data.length : 0,
-						has_data: !!response.data,
-						is_array: Array.isArray(response.data),
-						hasNext: response.hasNext,
-						next_offset: response.next,
-						sample_ids: [] as string[],
-						sample_names: [] as string[],
-					};
-					
-					if (response.data && response.data.length > 0) {
-						// Get first, middle, and last candidate as samples
-						const samples = [
-							response.data[0],
-							response.data[Math.floor(response.data.length / 2)],
-							response.data[response.data.length - 1]
-						];
-						
-						batchResult.sample_ids = samples.map(s => s.id);
-						batchResult.sample_names = samples.map(s => s.name || 'NO_NAME');
-					}
-					
-					results.push(batchResult);
-					
-					if (!response.hasNext || !response.next) break;
-					offset = response.next;
-				}
-				
-				const summary = {
-					total_batches: results.length,
-					total_candidates_fetched: results.reduce((sum, r) => sum + r.actual_count, 0),
-					all_batches_returned_100: results.every(r => r.actual_count === 100),
-					batches: results,
-				};
-				
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(summary, null, 2),
-						},
-					],
-				};
-			}),
-		);
 
-		// Debug get candidate - returns raw response
-		this.server.tool(
-			"debug_get_candidate",
-			{
-				opportunity_id: z.string(),
-			},
-			this.wrapToolWithTrace("debug_get_candidate", async (args) => {
-				try {
-					console.log(`DEBUG: Fetching raw data for candidate ${args.opportunity_id}`);
-					
-					// Make a direct API call to see what we get back
-					const response = await this.client.getOpportunity(args.opportunity_id);
-					
-					console.log(`DEBUG: Raw response:`, JSON.stringify(response));
-					
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									debug_info: {
-										opportunity_id: args.opportunity_id,
-										response_exists: !!response,
-										data_exists: !!response?.data,
-										data_type: typeof response?.data,
-										data_keys: response?.data ? Object.keys(response.data) : [],
-										has_id: !!response?.data?.id,
-										id_value: response?.data?.id || "NO_ID",
-										raw_data: response
-									}
-								}, null, 2),
-							},
-						],
-					};
-				} catch (error) {
-					console.error(`DEBUG: Error fetching candidate:`, error);
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									debug_error: {
-										opportunity_id: args.opportunity_id,
-										error_message: error instanceof Error ? error.message : String(error),
-										error_type: error?.constructor?.name || "Unknown",
-										error_stack: error instanceof Error ? error.stack : undefined
-									}
-								}, null, 2),
-							},
-						],
-					};
-				}
-			}),
-		);
 
-		// Debug postings - returns raw structure
-		this.server.tool(
-			"debug_postings",
-			{},
-			this.wrapToolWithTrace("debug_postings", async () => {
-				try {
-					console.log(`DEBUG: Fetching raw postings data`);
-					
-					// Get postings to see raw structure
-					const response = await this.client.getPostings("published", 3);
-					
-					console.log(`DEBUG: Raw postings response:`, JSON.stringify(response).slice(0, 500));
-					
-					// Get detailed info about the first posting
-					const firstPosting = response.data?.[0];
-					
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									debug_info: {
-										total_postings: response.data?.length || 0,
-										has_next: response.hasNext,
-										first_posting_keys: firstPosting ? Object.keys(firstPosting) : [],
-										first_posting_raw: firstPosting,
-										location_type: firstPosting?.location ? typeof firstPosting.location : "undefined",
-										team_type: firstPosting?.team ? typeof firstPosting.team : "undefined",
-										sample_data: {
-											id: firstPosting?.id,
-											text: firstPosting?.text,
-											state: firstPosting?.state,
-											location_raw: firstPosting?.location,
-											team_raw: firstPosting?.team,
-											urls_raw: firstPosting?.urls
-										}
-									}
-								}, null, 2),
-							},
-						],
-					};
-				} catch (error) {
-					console.error(`DEBUG: Error fetching postings:`, error);
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									debug_error: {
-										error_message: error instanceof Error ? error.message : String(error),
-										error_type: error?.constructor?.name || "Unknown"
-									}
-								}, null, 2),
-							},
-						],
-					};
-				}
-			}),
-		);
 
-		// Debug opportunities list - check what's coming back
-		this.server.tool(
-			"debug_opportunities_list",
-			{
-				name_search: z.string().optional(),
-				limit: z.number().default(5),
-			},
-			this.wrapToolWithTrace("debug_opportunities_list", async (args) => {
-				try {
-					console.log(`DEBUG: Fetching opportunities list`);
-					
-					// Get opportunities
-					const response = await this.client.getOpportunities({
-						limit: args.limit,
-					});
-					
-					console.log(`DEBUG: Raw opportunities response has ${response.data?.length || 0} items`);
-					
-					// Log the raw response
-					if (response.data && response.data.length > 0) {
-						console.log(`DEBUG: First opportunity raw:`, JSON.stringify(response.data[0]));
-					}
-					
-					// If searching by name, filter results
-					let opportunities = response.data || [];
-					if (args.name_search) {
-						const searchLower = args.name_search.toLowerCase();
-						opportunities = opportunities.filter(opp => {
-							const name = (opp.name || "").toLowerCase();
-							return name.includes(searchLower);
-						});
-					}
-					
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									debug_info: {
-										total_opportunities: response.data?.length || 0,
-										filtered_count: opportunities.length,
-										name_search: args.name_search || "none",
-										has_next: response.hasNext,
-										first_opportunity_keys: response.data?.[0] ? Object.keys(response.data[0]) : [],
-										opportunities: opportunities.slice(0, 3).map(opp => ({
-											id: opp.id,
-											name: opp.name || "NO_NAME",
-											name_exists: !!opp.name,
-											name_type: typeof opp.name,
-											email: opp.emails?.[0] || "NO_EMAIL", 
-											location: opp.location || "NO_LOCATION",
-											location_type: typeof opp.location,
-											headline: opp.headline || "NO_HEADLINE",
-											created: opp.createdAt ? new Date(opp.createdAt).toISOString() : "NO_DATE",
-											raw_snippet: JSON.stringify(opp).substring(0, 200)
-										}))
-									}
-								}, null, 2),
-							},
-						],
-					};
-				} catch (error) {
-					console.error(`DEBUG: Error fetching opportunities:`, error);
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify({
-									debug_error: {
-										error_message: error instanceof Error ? error.message : String(error),
-										error_type: error?.constructor?.name || "Unknown"
-									}
-								}, null, 2),
-							},
-						],
-					};
-				}
-			}),
-		);
+
+
+
+
+
+
 
 		// Find candidates for role
 		this.server.tool(
 			"lever_find_candidates_for_role",
 			{
 				posting_id: z.string(),
+				stage_names: z.array(z.string()).optional().describe("Filter by stage names"),
 				limit: z.number().default(200),
 				page: z.number().default(1).describe("Page number (1-based)"),
 			},
 			this.wrapToolWithTrace("lever_find_candidates_for_role", async (args) => {
 				try {
+					// Resolve stage names to IDs if provided
+					let stageIds: string[] = [];
+					if (args.stage_names && args.stage_names.length > 0) {
+						try {
+							stageIds = await resolveStageIdentifier(this.client, args.stage_names);
+						} catch (error) {
+							return {
+								content: [
+									{
+										type: "text",
+										text: JSON.stringify({
+											error: `Failed to resolve stage names: ${error instanceof Error ? error.message : String(error)}`,
+											posting_id: args.posting_id,
+											stage_names: args.stage_names,
+										}, null, 2),
+									},
+								],
+							};
+						}
+					}
+
 					const allCandidates: LeverOpportunity[] = [];
 					let offset: string | undefined;
 					const maxFetch = Math.min(args.limit * 10, 2000); // Support up to 10 pages
@@ -1511,12 +1108,23 @@ export class LeverMCP extends McpAgent {
 						offset = response.next;
 					}
 
+					// Filter by stage if stage_names was provided
+					let filteredCandidates = allCandidates;
+					if (stageIds.length > 0) {
+						filteredCandidates = allCandidates.filter(candidate => {
+							const candidateStageId = typeof candidate.stage === 'object' && candidate.stage 
+								? candidate.stage.id 
+								: candidate.stage;
+							return candidateStageId && stageIds.includes(candidateStageId as string);
+						});
+					}
+
 					// Calculate pagination
 					const page = Math.max(1, args.page);
 					const startIndex = (page - 1) * args.limit;
 					const endIndex = startIndex + args.limit;
-					const paginatedCandidates = allCandidates.slice(startIndex, endIndex);
-					const totalPages = Math.ceil(allCandidates.length / args.limit);
+					const paginatedCandidates = filteredCandidates.slice(startIndex, endIndex);
+					const totalPages = Math.ceil(filteredCandidates.length / args.limit);
 					const hasMore = page < totalPages;
 
 					return {
@@ -1527,11 +1135,12 @@ export class LeverMCP extends McpAgent {
 									{
 										count: paginatedCandidates.length,
 										page: page,
-										total_matches: allCandidates.length,
+										total_matches: filteredCandidates.length,
 										total_pages: totalPages,
 										has_more: hasMore,
 										next_page: hasMore ? page + 1 : null,
 										posting_id: args.posting_id,
+										stage_names: args.stage_names,
 										candidates: paginatedCandidates.map(formatOpportunity),
 									},
 									null,
