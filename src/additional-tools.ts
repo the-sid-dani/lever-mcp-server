@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "./lever/client";
 import type { LeverOpportunity } from "./types/lever";
+import { resolveSingleStageIdentifier } from "./utils/stage-helpers";
 
 // Helper to format opportunity data
 export function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
@@ -90,13 +91,33 @@ export function registerAdditionalTools(
 	server.tool(
 		"lever_search_candidates",
 		{
-			query: z.string().optional(),
-			stage: z.string().optional(),
+			query: z.string().optional().describe("Search query for name or email"),
+			stage_name: z.string().optional().describe("Stage name (not ID)"),
+			posting_id: z.string().optional().describe("Filter by specific posting"),
 			limit: z.number().default(200),
 			page: z.number().default(1).describe("Page number (1-based)"),
 		},
 		async (args) => {
 			try {
+				// Resolve stage name to ID if provided
+				let stageId: string | undefined;
+				if (args.stage_name) {
+					try {
+						stageId = await resolveSingleStageIdentifier(client, args.stage_name);
+					} catch (error) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										error: `Invalid stage name: ${args.stage_name}. ${error instanceof Error ? error.message : String(error)}`,
+									}),
+								},
+							],
+						};
+					}
+				}
+
 				// Check if query looks like an email
 				let emailFilter: string | undefined;
 				if (args.query && args.query.includes("@")) {
@@ -107,7 +128,8 @@ export function registerAdditionalTools(
 					// Use email search
 					const response = await client.getOpportunities({
 						email: emailFilter,
-						stage_id: args.stage,
+						stage_id: stageId,
+						posting_id: args.posting_id,
 						limit: args.limit,
 					});
 
@@ -141,7 +163,8 @@ export function registerAdditionalTools(
 						allOpportunities.length < maxFetch
 					) {
 						const response = await client.getOpportunities({
-							stage_id: args.stage,
+							stage_id: stageId,
+							posting_id: args.posting_id,
 							limit: 100,
 							offset,
 						});
@@ -202,7 +225,8 @@ export function registerAdditionalTools(
 				} else {
 					// No search criteria, just get candidates
 					const response = await client.getOpportunities({
-						stage_id: args.stage,
+						stage_id: stageId,
+						posting_id: args.posting_id,
 						limit: args.limit,
 					});
 
