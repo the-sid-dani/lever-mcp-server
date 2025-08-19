@@ -1,0 +1,18 @@
+commit a2af4b5738eca576c7dfcaaea07bbe7d45833457
+Merge: 5e26343 c07d81f
+Author: Sid Dani <sid.dani@samba.tv>
+Date:   Mon Aug 4 19:07:03 2025 -0700
+
+    Merge pull request #1 from the-sid-dani/feature/tool-consolidation
+    
+    Consolidate Lever MCP tools from 29 to 14
+
+ CHANGELOG.md                                    |  37 +
+ docs/PULL_REQUEST_SUMMARY.md                    | 180 +++++
+ docs/claude-project-prompt.md                   | 346 +++++----
+ docs/tool-consolidation-testing-verification.md | 224 ++++++
+ src/additional-tools.ts                         | 962 +++---------------------
+ src/index.ts                                    | 743 +++++-------------
+ src/lever/client.ts                             |  51 ++
+ src/utils/stage-helpers.ts                      | 103 +++
+ 8 files changed, 1072 insertions(+), 1574 deletions(-)

@@ -1,0 +1,17 @@
+commit a81c33e3d748e6526d063290cf7031906c40edf5
+Merge: a2af4b5 5a27d52
+Author: Sid Dani <sid.dani@samba.tv>
+Date:   Mon Aug 4 23:59:54 2025 -0700
+
+    Merge pull request #2 from the-sid-dani/feature/tool-consolidation
+    
+    Feature/tool consolidation
+
+ docs/lever_tools_guide.md  | 761 +++++++++++++++++++--------------------------
+ src/additional-tools.ts    |   5 +-
+ src/index.ts               |   5 +
+ src/interview-tools.ts     | 481 ++++++++++++++++++++++++++++
+ src/lever/client.ts        | 223 ++++++++++++-
+ src/types/lever.ts         |  93 +++++-
+ src/utils/stage-helpers.ts |  16 +-
+ 7 files changed, 1123 insertions(+), 461 deletions(-)

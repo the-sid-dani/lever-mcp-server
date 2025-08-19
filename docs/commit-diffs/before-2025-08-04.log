@@ -1,0 +1,53 @@
+6357585 2025-07-30 Revert "🎯 Fix: Interview optimization for recruiter dashboard"
+78529c3 2025-07-30 🎯 Fix: Interview optimization for recruiter dashboard
+6846b40 2025-07-28 feat: Update tools for Cloudflare paid plan - 20x more capacity!
+5e77fdb 2025-07-28 fix: Handle multiple expand parameters correctly in Lever API
+f0572b5 2025-07-28 fix: Fix expand parameter handling and pagination in posting search tools
+56cba25 2025-07-28 fix: Conservative fix for lever_find_postings_by_owner
+0b8a4a0 2025-07-28 Revert "fix: Fix lever_find_postings_by_owner to fetch all postings"
+72646bc 2025-07-28 fix: Fix lever_find_postings_by_owner to fetch all postings
+36e01ab 2025-07-28 fix: Major improvements to lever_recruiter_dashboard for accurate reporting
+d996c7f 2025-07-28 fix: Expand hiringManager field to show names instead of IDs
+3477b62 2025-07-28 feat: Optimize lever_recruiter_dashboard with pagination and summary mode
+b820259 2025-07-28 feat: Add ghost tool detection traces
+a45f79f 2025-07-28 feat: Add comprehensive tracing for debugging and performance monitoring
+1af3084 2025-07-28 Revert: Restore agents library with ghost tool prevention
+6ac9487 2025-07-28 Fix: Improve MCP tool registration and discovery
+aebba9f 2025-07-28 Fix: Implement proper MCP protocol over SSE
+f5b02c3 2025-07-28 Fix: Correct Durable Object binding name to match wrangler.jsonc configuration
+0e44371 2025-07-28 Refactor: Remove agents library dependency and implement direct MCP SDK usage
+8414e4d 2025-07-28 fix: Resolve Cloudflare 50 subrequest limit in recruiter dashboard
+07ac638 2025-07-28 fix: Remove duplicate lever_list_files tool registration
+25277c1 2025-07-28 feat: Add posting owner support and archived candidates search
+c8b8ace 2025-07-14 Add new Lever tools for candidate management and requisition handling
+e5ad734 2025-07-08 docs: add verification guide for search accuracy
+b3be84e 2025-07-08 feat: add comprehensive verification and logging for search accuracy
+c222703 2025-07-08 fix: improve search transparency and accuracy of candidate counting
+43d368f 2025-07-08 docs: complete recruiting team documentation suite
+3b3ee65 2025-07-08 docs: add comprehensive recruiting team guides and best practices
+283bf2d 2025-07-07 docs: explain lever_find_by_company default behavior change
+e841388 2025-07-07 fix: change lever_find_by_company default to search all work history
+fdd1b20 2025-07-07 docs: add test searches that work within free plan limits
+baf60e0 2025-07-07 fix: handle Cloudflare Workers subrequest limit for free plan
+b2c996a 2025-07-07 feat: extend search timeout from 25s to 60s for more comprehensive searches
+f84ec0c 2025-07-07 feat: implement token bucket rate limiting for better API stability
+4127335 2025-07-07 Add test documentation for comprehensive search improvements
+36c6c02 2025-07-07 Add documentation for comprehensive search improvements
+ffccdf2 2025-07-07 Improve advanced search to be more comprehensive
+343df38 2025-07-07 Add documentation for unknown values investigation
+997c273 2025-07-07 Add debug tools to investigate opportunities list API response
+c5c74b3 2025-07-07 Add documentation for double-wrapping fix
+3fb6483 2025-07-07 Fix double-wrapping issue in getOpportunity method
+9df2eb2 2025-07-07 Add documentation for API structure fixes
+667bab4 2025-07-07 Fix API data parsing based on Lever developer documentation
+9a71aa8 2025-07-07 Enhanced lever_get_candidate debugging
+159d7c9 2025-07-07 Fix lever_get_candidate empty data issue
+578859f 2025-07-07 Fix lever_advanced_search timeout issues
+8cf28c1 2025-07-04 Add retry logic for Lever API errors
+ce7e358 2025-07-04 Fix pagination offset token errors
+6caae7a 2025-07-04 Add pagination support to search tools
+3fc0330 2025-07-04 Fix advanced search and all tools to match Python implementation exactly
+3fea5ae 2025-07-04 Enhance lever_get_candidate to match Python implementation
+df7c9ea 2025-07-04 Fix lever_get_candidate tool error handling
+0a45833 2025-07-04 Update README with comprehensive documentation
+f829ee6 2025-07-04 Initial commit: Lever MCP Server for Cloudflare Workers

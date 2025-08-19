@@ -1,0 +1,92 @@
+commit d2b8d041839fd7f6ae3c319cb403b4ee101f1fa8
+Author: Sid Dani <sid.dani@samba.tv>
+Date:   Mon Aug 4 17:56:41 2025 -0700
+
+    Enhance lever_find_candidates_for_role tool
+    
+    - Added stage_names parameter for filtering by multiple stage names
+    - Integrated stage name resolution using resolveStageIdentifier
+    - Added filtering logic to filter candidates by stage IDs
+    - Updated response to include stage_names in the output
+---
+ src/index.ts | 40 +++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 37 insertions(+), 3 deletions(-)
+
+diff --git a/src/index.ts b/src/index.ts
+index b3702a0..cc4a0e3 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1059,11 +1059,33 @@ export class LeverMCP extends McpAgent {
+ 			"lever_find_candidates_for_role",
+ 			{
+ 				posting_id: z.string(),
++				stage_names: z.array(z.string()).optional().describe("Filter by stage names"),
+ 				limit: z.number().default(200),
+ 				page: z.number().default(1).describe("Page number (1-based)"),
+ 			},
+ 			this.wrapToolWithTrace("lever_find_candidates_for_role", async (args) => {
+ 				try {
++					// Resolve stage names to IDs if provided
++					let stageIds: string[] = [];
++					if (args.stage_names && args.stage_names.length > 0) {
++						try {
++							stageIds = await resolveStageIdentifier(this.client, args.stage_names);
++						} catch (error) {
++							return {
++								content: [
++									{
++										type: "text",
++										text: JSON.stringify({
++											error: `Failed to resolve stage names: ${error instanceof Error ? error.message : String(error)}`,
++											posting_id: args.posting_id,
++											stage_names: args.stage_names,
++										}, null, 2),
++									},
++								],
++							};
++						}
++					}
++
+ 					const allCandidates: LeverOpportunity[] = [];
+ 					let offset: string | undefined;
+ 					const maxFetch = Math.min(args.limit * 10, 2000); // Support up to 10 pages
+@@ -1086,12 +1108,23 @@ export class LeverMCP extends McpAgent {
+ 						offset = response.next;
+ 					}
+ 
++					// Filter by stage if stage_names was provided
++					let filteredCandidates = allCandidates;
++					if (stageIds.length > 0) {
++						filteredCandidates = allCandidates.filter(candidate => {
++							const candidateStageId = typeof candidate.stage === 'object' && candidate.stage 
++								? candidate.stage.id 
++								: candidate.stage;
++							return candidateStageId && stageIds.includes(candidateStageId as string);
++						});
++					}
++
+ 					// Calculate pagination
+ 					const page = Math.max(1, args.page);
+ 					const startIndex = (page - 1) * args.limit;
+ 					const endIndex = startIndex + args.limit;
+-					const paginatedCandidates = allCandidates.slice(startIndex, endIndex);
+-					const totalPages = Math.ceil(allCandidates.length / args.limit);
++					const paginatedCandidates = filteredCandidates.slice(startIndex, endIndex);
++					const totalPages = Math.ceil(filteredCandidates.length / args.limit);
+ 					const hasMore = page < totalPages;
+ 
+ 					return {
+@@ -1102,11 +1135,12 @@ export class LeverMCP extends McpAgent {
+ 									{
+ 										count: paginatedCandidates.length,
+ 										page: page,
+-										total_matches: allCandidates.length,
++										total_matches: filteredCandidates.length,
+ 										total_pages: totalPages,
+ 										has_more: hasMore,
+ 										next_page: hasMore ? page + 1 : null,
+ 										posting_id: args.posting_id,
++										stage_names: args.stage_names,
+ 										candidates: paginatedCandidates.map(formatOpportunity),
+ 									},
+ 									null,

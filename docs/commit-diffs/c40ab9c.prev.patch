@@ -1,0 +1,173 @@
+commit c40ab9ce1e02f34e8a44f47df91c956775c7d723
+Author: Sid Dani <sid.dani@samba.tv>
+Date:   Mon Aug 4 18:16:09 2025 -0700
+
+    Complete lever_update_candidate tool implementation
+    
+    - Added addCandidateTags and removeCandidateTags methods to LeverClient
+    - Updated lever_update_candidate tool to use the new tag management methods
+    - Added placeholder comments for getUsers and updateOpportunityOwner methods that are not directly supported by Lever API
+    - Tag management is now fully functional in the consolidated update tool
+---
+ src/additional-tools.ts | 89 +++++++++++++++++++++++++++++++++++++++++++++++++
+ src/lever/client.ts     | 51 ++++++++++++++++++++++++++++
+ 2 files changed, 140 insertions(+)
+
+diff --git a/src/additional-tools.ts b/src/additional-tools.ts
+index 29781c9..ec85a12 100644
+--- a/src/additional-tools.ts
++++ b/src/additional-tools.ts
+@@ -892,4 +892,93 @@ export function registerAdditionalTools(
+ 			}
+ 		},
+ 	);
++
++	// Consolidated update tool for stage, owner, and tags
++	server.tool(
++		"lever_update_candidate",
++		{
++			opportunity_id: z.string().describe("The candidate's opportunity ID"),
++			stage_id: z.string().optional().describe("Move to this stage ID"),
++			stage_name: z.string().optional().describe("Move to stage with this name"),
++			owner_id: z.string().optional().describe("Assign to this user"),
++			add_tags: z.array(z.string()).optional().describe("Tags to add"),
++			remove_tags: z.array(z.string()).optional().describe("Tags to remove"),
++		},
++		async (args) => {
++			try {
++				const updates: any = {};
++				
++				// Handle stage update by name
++				if (args.stage_name && !args.stage_id) {
++					const stages = await client.getStages();
++					const stage = stages.data.find((s: any) => 
++						s.text.toLowerCase().includes(args.stage_name!.toLowerCase())
++					);
++					if (stage) {
++						args.stage_id = stage.id;
++					} else {
++						throw new Error(`Stage "${args.stage_name}" not found`);
++					}
++				}
++				
++				// Perform updates
++				const results = [];
++				
++				if (args.stage_id) {
++					await client.updateOpportunityStage(args.opportunity_id, args.stage_id);
++					results.push({ action: "stage_updated", stage_id: args.stage_id });
++				}
++				
++				if (args.owner_id) {
++					// Note: This would need a new method in LeverClient
++					// await client.updateOpportunityOwner(args.opportunity_id, args.owner_id);
++					results.push({ action: "owner_updated", owner_id: args.owner_id, note: "Owner update not yet implemented in LeverClient" });
++				}
++				
++				if (args.add_tags || args.remove_tags) {
++					// Handle tag updates
++					if (args.add_tags && args.add_tags.length > 0) {
++						await client.addCandidateTags(args.opportunity_id, args.add_tags);
++					}
++					if (args.remove_tags && args.remove_tags.length > 0) {
++						await client.removeCandidateTags(args.opportunity_id, args.remove_tags);
++					}
++					results.push({ 
++						action: "tags_updated", 
++						added: args.add_tags || [],
++						removed: args.remove_tags || []
++					});
++				}
++				
++				// Get updated candidate info
++				const opportunityResponse = await client.getOpportunity(args.opportunity_id);
++				const opportunity = opportunityResponse.data;
++				
++				return {
++					content: [{
++						type: "text",
++						text: JSON.stringify({
++							success: true,
++							opportunity_id: args.opportunity_id,
++							candidate_name: opportunity.name || "Unknown",
++							current_stage: typeof opportunity.stage === 'object' && opportunity.stage 
++								? opportunity.stage.text 
++								: "Unknown",
++							updates: results
++						}, null, 2)
++					}]
++				};
++			} catch (error) {
++				return {
++					content: [{
++						type: "text",
++						text: JSON.stringify({
++							error: error instanceof Error ? error.message : String(error),
++							opportunity_id: args.opportunity_id
++						})
++					}]
++				};
++			}
++		}
++	);
+ }
+diff --git a/src/lever/client.ts b/src/lever/client.ts
+index 6ebf97e..ffa4d57 100644
+--- a/src/lever/client.ts
++++ b/src/lever/client.ts
+@@ -466,4 +466,55 @@ export class LeverClient {
+ 
+ 		return this.makeRequest("GET", "/opportunities", queryParams);
+ 	}
++
++	// Tag management methods
++	async addCandidateTags(
++		opportunityId: string,
++		tags: string[],
++		performAs?: string
++	): Promise<any> {
++		const params: any = {};
++		if (performAs) {
++			params.perform_as = performAs;
++		}
++		
++		return this.makeRequest(
++			"POST",
++			`/opportunities/${opportunityId}/addTags`,
++			params,
++			{ tags }
++		);
++	}
++
++	async removeCandidateTags(
++		opportunityId: string,
++		tags: string[],
++		performAs?: string
++	): Promise<any> {
++		const params: any = {};
++		if (performAs) {
++			params.perform_as = performAs;
++		}
++		
++		return this.makeRequest(
++			"POST",
++			`/opportunities/${opportunityId}/removeTags`,
++			params,
++			{ tags }
++		);
++	}
++
++	// Note: The following methods are placeholders for functionality that may not be 
++	// directly supported by the Lever API or require additional research:
++	
++	// async getUsers(): Promise<any> {
++	//   // TODO: Implement if/when Lever API provides a users endpoint
++	//   throw new Error("getUsers is not yet implemented - Lever API documentation needed");
++	// }
++	
++	// async updateOpportunityOwner(opportunityId: string, ownerId: string): Promise<any> {
++	//   // TODO: Implement if/when Lever API provides an owner update endpoint
++	//   // The API doesn't seem to have a direct endpoint for updating the owner field
++	//   throw new Error("updateOpportunityOwner is not yet implemented - Lever API may not support this directly");
++	// }
+ }
