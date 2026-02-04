@@ -1,0 +1,24 @@
+# Docker ignore file
+.git
+.gitignore
+.env
+.env.*
+node_modules
+dist
+*.log
+.DS_Store
+.vscode
+.idea
+*.md
+tests
+coverage
+.nyc_output
+thoughts
+docs
+.claude
+.tldr
+.tldrignore
+wrangler.jsonc
+worker-configuration.d.ts
+cloudbuild.yaml
+.gcloudignore

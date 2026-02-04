@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { LeverClient } from "./lever/client";
-import type { LeverInterview, LeverPanel, LeverOpportunity } from "./types/lever";
+import type { LeverClient } from "./lever/client.js";
+import type { LeverInterview, LeverPanel, LeverOpportunity } from "./types/lever.js";
 
 /**
  * Register interview-related tools with the MCP server

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { LeverClient } from "./lever/client";
-import type { LeverOpportunity } from "./types/lever";
-import { resolveSingleStageIdentifier } from "./utils/stage-helpers";
+import type { LeverClient } from "./lever/client.js";
+import type { LeverOpportunity } from "./types/lever.js";
+import { resolveSingleStageIdentifier } from "./utils/stage-helpers.js";
 
 // Helper to format opportunity data
 export function formatOpportunity(opp: LeverOpportunity): Record<string, any> {

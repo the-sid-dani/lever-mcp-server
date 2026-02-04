@@ -4,7 +4,7 @@ import type {
 	LeverPosting,
 	LeverInterview,
 	LeverPanel,
-} from "../types/lever";
+} from "../types/lever.js";
 
 // Simple token bucket implementation for rate limiting
 class TokenBucket {

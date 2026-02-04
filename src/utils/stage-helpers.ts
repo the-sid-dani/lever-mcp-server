@@ -1,4 +1,4 @@
-import type { LeverClient } from '../lever/client';
+import type { LeverClient } from '../lever/client.js';
 
 /**
  * Resolves stage identifiers (names or IDs) to stage IDs
