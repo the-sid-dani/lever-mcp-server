@@ -1,0 +1,126 @@
+{
+  "data": [
+    {
+      "id": "ca5373af-213e-44ef-af2c-471bdff8c70f",
+      "text": "Software Engineer - Data Integration",
+      "state": "published",
+      "distributionChannels": [
+        "internal",
+        "public"
+      ],
+      "user": "1592c832-558e-47c6-b09e-1ff64fd96290",
+      "owner": "1592c832-558e-47c6-b09e-1ff64fd96290",
+      "hiringManager": "126b1a93-bbaa-4923-837f-ac11845853f9",
+      "categories": {
+        "commitment": "International Full Time Employee",
+        "department": "Engineering",
+        "level": null,
+        "location": "Amsterdam",
+        "team": "Product Engineering",
+        "allLocations": [
+          "Amsterdam"
+        ]
+      },
+      "tags": [],
+      "content": {
+        "description": "Samba is a media intelligence company. We know what the world is watching, reading, and thinking about — in real time, at scale, across every screen. Our data exists with the consent of over a billion people, organized into the most complete picture of consumer attention ever built. The biggest brands in the world use that picture to make smarter decisions. We think it’s the most interesting data asset on the planet, because it’s the most culturally relevant. \n",
+        "descriptionHtml": "<div><strong>Samba is a media intelligence company. We know what the world is watching, reading, and thinking about — in real time, at scale, across every screen. Our data exists with the consent of over a billion people, organized into the most complete picture of consumer attention ever built. The biggest brands in the world use that picture to make smarter decisions. We think it’s the most interesting data asset on the planet, because it’s the most culturally relevant. </strong></div><div><br /></div><p>We are looking for a Software Engineer to join our Data Integration team in Amsterdam. The Data Integration team builds and operates the platform that moves data into, through, and out of Samba TV: ingestion from clients and partners, processing and enrichment against our identity and signal layers, and distribution to downstream destinations. This is a foundational platform investment, built to scale with the next generation of data partnerships and to power agentic, self-service data workflows.</p>\n<p>In this role, ​​you will design, build, and operate meaningful components of the data integration platform, working independently with review at critical points. You bring 5+ years of professional software engineering experience, are comfortable owning features end-to-end, and contribute to technical direction within your scope. You work well in collaborative settings and actively participate in design and code review.</p>\n<div> </div>",
+        "lists": [
+          {
+            "content": "<div>\n<h3><strong>Data Engineering &amp; System Development</strong></h3>\n<ul>\n<li>\n<p>Design and build reliable data pipelines for ingestion, transformation, and distribution of large-scale datasets, making sound architectural decisions within your scope.</p>\n</li>\n<li>\n<p>Develop ETL/ELT workflows using distributed computing frameworks on cloud infrastructure, applying engineering judgment to design and implementation decisions within your scope, partnering with senior engineers on broader architecture.</p>\n</li>\n<li>\n<p>Build API-first services that expose ingestion, processing, and distribution capabilities to internal teams and external consumers, with attention to reliability, clear contracts, and ease of integration.</p>\n</li>\n<li>\n<p>Implement data quality validation, monitoring, and observability for the components you own, ensuring reliability and correctness in production.</p>\n</li>\n<li>\n<p>Build reusable platform components with a clear understanding of how they serve downstream consumers.</p>\n</li>\n</ul>\n<h3><strong>Data Integration &amp; Domain Ownership</strong></h3>\n<ul>\n<li>\n<p>Take ownership of components within the data integration platform, ingestion, processing, or distribution, and drive their reliability and iteration.</p>\n</li>\n<li>\n<p>Build partner and destination integrations end-to-end, including throughput tuning and operational handoff.</p>\n</li>\n<li>\n<p>Apply GDPR, CCPA, and Samba data governance requirements to the systems you build.</p>\n</li>\n<li>\n<p>Collaborate with immediate team members and engage with adjacent teams to understand downstream use cases.</p>\n</li>\n</ul>\n<h3><strong>Technical Contribution &amp; Collaboration</strong></h3>\n<ul>\n<li>\n<p>Drive technical design for components within your scope, producing design documents and participating actively in architecture discussions.</p>\n</li>\n<li>\n<p>Conduct code reviews and uphold strong standards for code quality, testability, and maintainability across the team.</p>\n</li>\n<li>\n<p>Build working relationships with adjacent teams and reason about cross-functional requirements.</p>\n</li>\n</ul>\n<h3><strong>Operational Ownership</strong></h3>\n<ul>\n<li>\n<p>Own the reliability of your components, monitor their health, respond to incidents, and follow through on post-mortem improvements.</p>\n</li>\n<li>\n<p>Participate in on-call rotations and contribute to improving operational practices across the team.</p>\n</li>\n<li>\n<p>Build and maintain CI/CD pipelines, deployment processes, and testing coverage for team systems.</p>\n</li>\n</ul>\n</div>",
+            "text": "What You'll Do"
+          },
+          {
+            "content": "<div>\n<h3><strong>Required</strong></h3>\n<ul>\n<li>\n<p>5+ years of professional software engineering experience with a Bachelor's degree in Computer Science, Software Engineering, or a related technical field (or 3+ years with a Master's, a PhD with no prior experience, or equivalent), with a meaningful focus on data engineering, backend systems, or distributed data infrastructure.</p>\n</li>\n<li>\n<p>Proficiency in Python and SQL; ability to write clean, well-tested, production-ready code.</p>\n</li>\n<li>\n<p>Hands-on experience with distributed processing frameworks (e.g., Spark, Databricks, or equivalent) in production.</p>\n</li>\n<li>\n<p>Hands-on production experience building cloud-native data systems on AWS, GCP, or Databricks, including their core data services.</p>\n</li>\n<li>\n<p>Experience building API-first services with a focus on correctness and reliability.</p>\n</li>\n<li>\n<p>Working experience with streaming or event-driven data processing frameworks (e.g., Kafka, Flink, Spark Streaming, or equivalent).</p>\n</li>\n<li>\n<p>Experience with workflow orchestration tools (Apache Airflow, dbt, Prefect, or equivalent).</p>\n</li>\n<li>\n<p>Familiarity with data privacy regulations (GDPR, CCPA) and an understanding of how they affect system design.</p>\n</li>\n<li>\n<p>A clear communicator who participates actively in design discussions, shares context proactively, and works well across a team. Comfortable advising more junior engineers on technical matters within your area.</p>\n</li>\n</ul>\n<h3><strong>Preferred</strong></h3>\n<ul>\n<li>\n<p>Familiarity with data warehousing and lakehouse technologies, with a preference for Snowflake.</p>\n</li>\n<li>\n<p>Experience building or operating multi-tenant data platforms.</p>\n</li>\n<li>\n<p>Experience with AI/ML integration in production data workflows.</p>\n</li>\n<li>\n<p>Exposure to ad tech, audience activation, data licensing, or digital media — familiarity with concepts such as device graphs, audience segmentation, identity resolution, or measurement.</p>\n</li>\n</ul>\n</div>",
+            "text": "Who You Are"
+          }
+        ],
+        "closing": "Samba is an equal opportunity employer. We celebrate diversity and are committed to creating an inclusive environment for all employees.  We strive to empower connection with one another, reflect the communities we serve, and tackle meaningful projects that make a real impact.\n \nSamba may collect personal information directly from you, as a job applicant, Samba may also receive personal information from third parties, for example, in connection with a background, employment or reference check, in accordance with the applicable law. For further details, please see Samba's Applicant Privacy Policy. For residents of the EU , Samba Inc. is the data controller. \n",
+        "closingHtml": "<div>Base salary is just one component of Samba total compensation package for employees. Other rewards may include bonuses, short-term incentives, and long-term incentives. In addition, Samba provides health insurance, wellness offerings, life and disability insurance, a retirement savings plan, paid holidays and paid time off (PTO), and other employee benefits.</div><div><br /></div><div><strong>Samba is an equal opportunity employer. We celebrate diversity and are committed to creating an inclusive environment for all employees.  We strive to empower connection with one another, reflect the communities we serve, and tackle meaningful projects that make a real impact.</strong></div>\n<div> </div>\n<div><span style=\"font-size:12px\">Samba may collect personal information directly from you, as a job applicant, Samba may also receive personal information from third parties, for example, in connection with a background, employment or reference check, in accordance with the applicable law.</span><strong style=\"font-size:12px\"> For further details, please see Samba's </strong><a class=\"postings-link\" style=\"font-size:18px\" href=\"https://www.samba.tv/applicant-privacy-notice\"><strong>Applicant Privacy Policy</strong></a><strong style=\"font-size:18px\">.</strong><strong style=\"font-size:12px\"> For residents of the EU , Samba Inc. is the data controller. </strong></div>"
+      },
+      "country": "NL",
+      "followers": [
+        "1592c832-558e-47c6-b09e-1ff64fd96290",
+        "126b1a93-bbaa-4923-837f-ac11845853f9"
+      ],
+      "reqCode": null,
+      "requisitionCodes": [
+        "2301"
+      ],
+      "urls": {
+        "list": "https://jobs.lever.co/sambatv",
+        "show": "https://jobs.lever.co/sambatv/ca5373af-213e-44ef-af2c-471bdff8c70f",
+        "apply": "https://jobs.lever.co/sambatv/ca5373af-213e-44ef-af2c-471bdff8c70f/apply"
+      },
+      "confidentiality": "non-confidential",
+      "createdAt": 1779287348517,
+      "updatedAt": 1779426063929,
+      "workplaceType": "hybrid",
+      "screening": {
+        "enabled": false
+      }
+    },
+    {
+      "id": "38f3d59c-71ee-40a5-bce6-d94c58984060",
+      "text": "Junior Software Engineer - Data Integration",
+      "state": "published",
+      "distributionChannels": [
+        "internal",
+        "public"
+      ],
+      "user": "1592c832-558e-47c6-b09e-1ff64fd96290",
+      "owner": "1592c832-558e-47c6-b09e-1ff64fd96290",
+      "hiringManager": "126b1a93-bbaa-4923-837f-ac11845853f9",
+      "categories": {
+        "commitment": "International Full Time Employee",
+        "department": "Engineering",
+        "level": null,
+        "location": "Amsterdam",
+        "team": "Product Engineering",
+        "allLocations": [
+          "Amsterdam"
+        ]
+      },
+      "tags": [],
+      "content": {
+        "description": "Samba is a media intelligence company. We know what the world is watching, reading, and thinking about — in real time, at scale, across every screen. Our data exists with the consent of over a billion people, organized into the most complete picture of consumer attention ever built. The biggest brands in the world use that picture to make smarter decisions. We think it’s the most interesting data asset on the planet, because it’s the most culturally relevant. \n",
+        "descriptionHtml": "<div><strong>Samba is a media intelligence company. We know what the world is watching, reading, and thinking about — in real time, at scale, across every screen. Our data exists with the consent of over a billion people, organized into the most complete picture of consumer attention ever built. The biggest brands in the world use that picture to make smarter decisions. We think it’s the most interesting data asset on the planet, because it’s the most culturally relevant. </strong></div><div><br /></div><div>\n<p style=\"line-height:1.2;margin-top:0pt;margin-bottom:6pt\"><span style=\"font-size:11pt;font-family:Arial, sans-serif\">We are looking for a Junior Software Engineer to join our Data Integration team in Amsterdam. The Data Integration team builds and operates the platform that moves data into, through, and out of Samba TV: ingestion from clients and partners, processing and enrichment against our identity and signal layers, and distribution to downstream destinations. This is a foundational platform investment, built to scale with the next generation of data partnerships and to power agentic, self-service data workflows.</span></p>\n<p style=\"line-height:1.2;margin-top:0pt;margin-bottom:6pt\"><span style=\"font-size:11pt;font-family:Arial, sans-serif\">In this role, you will build and maintain production-grade data systems, taking ownership of well-defined components and receiving direction on new or ambiguous work from your senior peers. You bring 2+ years of professional software engineering experience with a Bachelor's degree in Computer Science, Software Engineering, or a related technical field (or an advanced degree without prior experience, or equivalent), a curiosity for data infrastructure, and a desire to grow quickly in a collaborative, technically strong team. You will work on features of moderate scope that require judgment across a variety of factors, modify approaches as needed, and deliver against well-defined components of large-scale data platforms while continuing to deepen your craft.</span></p>\n</div>",
+        "lists": [
+          {
+            "content": "<div>\n<h3><strong>Data Engineering &amp; Development</strong></h3>\n<ul>\n<li>\n<p>Contribute to data pipelines for ingestion, transformation, and distribution of datasets, implementing features that require analysis across a variety of factors.</p>\n</li>\n<li>\n<p>Build ETL/ELT workflows using distributed computing frameworks on cloud infrastructure, applying team standards and adapting approaches where needed.</p>\n</li>\n<li>\n<p>Implement and test API endpoints that expose ingestion, processing, and distribution capabilities, with a focus on correctness and clear contracts.</p>\n</li>\n<li>\n<p>Write automated tests and contribute to data quality validation and monitoring for pipeline components you work on.</p>\n</li>\n<li>\n<p>Apply Samba's platform patterns to produce reliable, maintainable code that fits within the broader system.</p>\n</li>\n</ul>\n<h3><strong>Data Integration &amp; Implementation</strong></h3>\n<ul>\n<li>\n<p>Implement partner and destination integrations against established patterns.</p>\n</li>\n<li>\n<p>Apply privacy and data governance requirements (GDPR, CCPA) to the code you write, following established team patterns and escalating questions appropriately.</p>\n</li>\n<li>\n<p>Collaborate closely with your immediate team and reason about how your work fits within the broader data platform.</p>\n</li>\n</ul>\n<h3><strong>Technical Contribution &amp; Collaboration</strong></h3>\n<ul>\n<li>\n<p>Participate in code reviews, both as an author and a reviewer.</p>\n</li>\n<li>\n<p>Write clear, well-tested, maintainable code that meets the team's quality standards.</p>\n</li>\n<li>\n<p>Communicate proactively about blockers, progress, and questions, and engage constructively in team discussions.</p>\n</li>\n</ul>\n<h3><strong>Operational Ownership</strong></h3>\n<ul>\n<li>\n<p>Participate in on-call rotations and contribute to improving operational practices across the team.</p>\n</li>\n<li>\n<p>Implement monitoring and alerting for components you own.</p>\n</li>\n<li>\n<p>Help maintain and improve CI/CD pipelines and testing coverage for team systems.</p>\n</li>\n</ul>\n</div>",
+            "text": "What You'll Do"
+          },
+          {
+            "content": "<div>\n<h3><strong>Required</strong></h3>\n<ul>\n<li>\n<p>2+ years of professional software engineering experience with a Bachelor's degree in Computer Science, Software Engineering, or a related technical field (or an advanced degree without prior experience, or equivalent), with experience in data engineering, backend systems, or distributed data infrastructure.</p>\n</li>\n<li>\n<p>Proficiency in Python and SQL; ability to write clean, tested, production-ready code.</p>\n</li>\n<li>\n<p>Hands-on experience with AWS or GCP and their core data services.</p>\n</li>\n<li>\n<p>Experience with data pipeline tools or workflow orchestration (e.g., Airflow, dbt, or equivalent) in a production environment.</p>\n</li>\n<li>\n<p>Familiarity data privacy regulations (GDPR, CCPA).</p>\n</li>\n<li>\n<p>Ability to communicate clearly, ask good questions, and work collaboratively within a team.</p>\n</li>\n</ul>\n<h3><strong>Preferred</strong></h3>\n<ul>\n<li>\n<p>Exposure to distributed processing frameworks (e.g., Spark, Databricks, or equivalent).</p>\n</li>\n<li>\n<p>Familiarity with streaming or event-driven data systems (e.g., Kafka or equivalent).</p>\n</li>\n<li>\n<p>Exposure to ad tech, audience activation, data licensing, or digital media.</p>\n</li>\n</ul>\n</div>",
+            "text": "Who You Are"
+          }
+        ],
+        "closing": "Samba is an equal opportunity employer. We celebrate diversity and are committed to creating an inclusive environment for all employees.  We strive to empower connection with one another, reflect the communities we serve, and tackle meaningful projects that make a real impact.\n \nSamba may collect personal information directly from you, as a job applicant, Samba may also receive personal information from third parties, for example, in connection with a background, employment or reference check, in accordance with the applicable law. For further details, please see Samba's Applicant Privacy Policy. For residents of the EU , Samba Inc. is the data controller. \n",
+        "closingHtml": "<div>Base salary is just one component of Samba total compensation package for employees. Other rewards may include bonuses, short-term incentives, and long-term incentives. In addition, Samba provides health insurance, wellness offerings, life and disability insurance, a retirement savings plan, paid holidays and paid time off (PTO), and other employee benefits.</div><div><br /></div><div><strong>Samba is an equal opportunity employer. We celebrate diversity and are committed to creating an inclusive environment for all employees.  We strive to empower connection with one another, reflect the communities we serve, and tackle meaningful projects that make a real impact.</strong></div>\n<div> </div>\n<div><span style=\"font-size:12px\">Samba may collect personal information directly from you, as a job applicant, Samba may also receive personal information from third parties, for example, in connection with a background, employment or reference check, in accordance with the applicable law.</span><strong style=\"font-size:12px\"> For further details, please see Samba's </strong><a class=\"postings-link\" style=\"font-size:18px\" href=\"https://www.samba.tv/applicant-privacy-notice\"><strong>Applicant Privacy Policy</strong></a><strong style=\"font-size:18px\">.</strong><strong style=\"font-size:12px\"> For residents of the EU , Samba Inc. is the data controller. </strong></div>"
+      },
+      "country": "NL",
+      "followers": [
+        "1592c832-558e-47c6-b09e-1ff64fd96290",
+        "126b1a93-bbaa-4923-837f-ac11845853f9"
+      ],
+      "reqCode": null,
+      "requisitionCodes": [
+        "2300"
+      ],
+      "urls": {
+        "list": "https://jobs.lever.co/sambatv",
+        "show": "https://jobs.lever.co/sambatv/38f3d59c-71ee-40a5-bce6-d94c58984060",
+        "apply": "https://jobs.lever.co/sambatv/38f3d59c-71ee-40a5-bce6-d94c58984060/apply"
+      },
+      "confidentiality": "non-confidential",
+      "createdAt": 1779286582467,
+      "updatedAt": 1779426063933,
+      "workplaceType": "hybrid",
+      "screening": {
+        "enabled": false
+      }
+    }
+  ],
+  "hasNext": true,
+  "next": "%5B1779214185112%2C%22d4b858c7-eb73-447a-a83a-17e84106082b%22%5D"
+}

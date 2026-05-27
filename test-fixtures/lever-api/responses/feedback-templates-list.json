@@ -1,0 +1,32 @@
+{
+  "data": [
+    {
+      "id": "fbt-test-ae-executive",
+      "text": "AE Executive",
+      "instructions": "Complete this form after the interview.",
+      "baseTemplateId": null,
+      "fields": [
+        {"id": "field-rating", "type": "score-system", "required": 1, "text": "Rating", "description": "Overall rating"},
+        {"id": "field-territory", "type": "textarea", "required": 1, "text": "How do you approach your territory?"},
+        {"id": "field-strengths", "type": "textarea", "required": 1, "text": "Strengths"},
+        {"id": "field-concerns", "type": "textarea", "required": 0, "text": "Concerns"},
+        {"id": "field-recommendation", "type": "scorecard", "required": 1, "text": "Recommendation", "scores": ["Strong No Hire", "No Hire", "Hire", "Strong Hire"]}
+      ],
+      "createdAt": 1700000000000
+    },
+    {
+      "id": "fbt-test-ae-programmatic",
+      "text": "AE Focus area: Programmatic Consulting",
+      "instructions": null,
+      "baseTemplateId": null,
+      "fields": [
+        {"id": "field-rating", "type": "score-system", "required": 1, "text": "Rating"},
+        {"id": "field-experience", "type": "textarea", "required": 1, "text": "Experience with programmatic platforms"},
+        {"id": "field-recommendation", "type": "scorecard", "required": 1, "text": "Recommendation"}
+      ],
+      "createdAt": 1700100000000
+    }
+  ],
+  "hasNext": false,
+  "next": null
+}

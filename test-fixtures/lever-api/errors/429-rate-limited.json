@@ -1,0 +1,5 @@
+{
+  "code": "RateLimitError",
+  "message": "Too many requests. Please retry after the duration indicated by the Retry-After header.",
+  "retryAfterSeconds": 1
+}

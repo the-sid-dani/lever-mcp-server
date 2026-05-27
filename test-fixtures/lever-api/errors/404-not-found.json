@@ -1,0 +1,4 @@
+{
+  "code": "ResourceNotFoundError",
+  "message": "Opportunity with id opp-does-not-exist not found."
+}

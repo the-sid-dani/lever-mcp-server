@@ -1,0 +1,37 @@
+{
+  "data": {
+    "id": "opp-test-001",
+    "name": "Test Candidate One",
+    "contact": "contact-test-001",
+    "headline": "Senior Engineer at ExampleCo",
+    "stage": "stage-test-phone-screen",
+    "stageChanges": [
+      {"toStageId": "stage-test-applied", "updatedAt": 1738531200000, "userId": "user-test-recruiter-001"},
+      {"toStageId": "stage-test-phone-screen", "updatedAt": 1739000000000, "userId": "user-test-recruiter-001"}
+    ],
+    "owner": {
+      "id": "user-test-recruiter-001",
+      "name": "Test Recruiter One",
+      "email": "recruiter1@samba.tv",
+      "username": "recruiter1",
+      "accessRole": "user"
+    },
+    "followers": ["user-test-hm-001"],
+    "tags": ["referral", "senior"],
+    "sources": ["LinkedIn"],
+    "origin": "agency",
+    "sourcedBy": "user-test-recruiter-001",
+    "createdAt": 1738531200000,
+    "lastInteractionAt": 1740000000000,
+    "lastAdvancedAt": 1739000000000,
+    "snoozedUntil": null,
+    "archived": null,
+    "applications": ["app-test-001"],
+    "links": ["https://linkedin.com/in/testcandidate1"],
+    "emails": ["test1@example.com"],
+    "phones": [{"type": "mobile", "value": "+1-555-0100"}],
+    "location": {"name": "San Francisco, CA"},
+    "isAnonymized": false,
+    "dataProtection": null
+  }
+}

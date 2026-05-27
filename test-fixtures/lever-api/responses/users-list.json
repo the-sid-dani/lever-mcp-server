@@ -1,0 +1,50 @@
+{
+  "data": [
+    {
+      "id": "user-test-recruiter-001",
+      "name": "Test Recruiter One",
+      "username": "recruiter1",
+      "email": "recruiter1@samba.tv",
+      "accessRole": "user",
+      "deactivatedAt": null,
+      "createdAt": 1700000000000,
+      "links": [],
+      "phone": null
+    },
+    {
+      "id": "user-test-recruiter-002",
+      "name": "Test Recruiter Two",
+      "username": "recruiter2",
+      "email": "recruiter2@samba.tv",
+      "accessRole": "user",
+      "deactivatedAt": null,
+      "createdAt": 1700100000000,
+      "links": [],
+      "phone": null
+    },
+    {
+      "id": "user-test-hm-001",
+      "name": "Test Hiring Manager",
+      "username": "hm1",
+      "email": "hm1@samba.tv",
+      "accessRole": "interviewer",
+      "deactivatedAt": null,
+      "createdAt": 1700200000000,
+      "links": [],
+      "phone": null
+    },
+    {
+      "id": "user-test-deactivated",
+      "name": "Test Former Employee",
+      "username": "former",
+      "email": "former@samba.tv",
+      "accessRole": "user",
+      "deactivatedAt": 1730000000000,
+      "createdAt": 1690000000000,
+      "links": [],
+      "phone": null
+    }
+  ],
+  "hasNext": false,
+  "next": null
+}

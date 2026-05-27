@@ -1,0 +1,612 @@
+{
+  "data": [
+    {
+      "id": "385982d6-08b9-4c64-8fc4-fce353235530",
+      "text": "AE Executive",
+      "group": {
+        "id": "be55e677-9ee1-45e0-a152-a10b5e48fd36",
+        "name": "AE Hiring "
+      },
+      "instructions": "Priorities\nDiligent in planning, record keeping, forecasting & other sales ops imperatives\nExperienced in utilizing all resources at hand to achieve/exceed revenue goals\nOrganized & self motivated; holds self & others accountable to a high standard\nStrategic thinker who can analyze business to understand opportunities & prioritize\n\n",
+      "fields": [
+        {
+          "description": "",
+          "required": true,
+          "text": "Rating",
+          "type": "score-system",
+          "id": "5bdb285d-9320-413d-b45c-1e72ced7764c",
+          "prompt": "Select one",
+          "options": [
+            {
+              "text": "4 - Strong Hire",
+              "optionId": "d4c30ca1-c328-4c8b-bedf-0b796fd9bf48"
+            },
+            {
+              "text": "3 - Hire",
+              "optionId": "9a4625c3-b5bd-4a07-bbb2-d787750bd997"
+            },
+            {
+              "text": "2 - No Hire",
+              "optionId": "89f01abc-2d39-4d3b-af8a-b5905ca917cc"
+            },
+            {
+              "text": "1 - Strong No Hire",
+              "optionId": "f857c1a4-bb4c-42ae-858a-51ba18d9a440"
+            }
+          ]
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How do you approach your territory?",
+          "type": "textarea",
+          "id": "01508a1a-296c-414e-8feb-8bbcf32d7b36"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Who are your competitors in market? Which sellers do you hate going up against? Which companies? How do you deposition them?",
+          "type": "textarea",
+          "id": "aef22f3a-5775-49a9-a4df-6b4cdcb42f37"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How do you prepare for a meeting?",
+          "type": "textarea",
+          "id": "d21e8b0b-a22f-447b-a638-b1450024a83b"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What is your strategy for getting new business?",
+          "type": "textarea",
+          "id": "c2a30da4-0976-4f38-80cc-44328db6e9e9"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Does your approach to your business change if you're doing well? / not doing well?",
+          "type": "textarea",
+          "id": "49a45cd3-9bae-4c41-8051-0cc7e61245ef"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What are you working on (personal growth)? What are you taking time to learn and develop in yourself?",
+          "type": "textarea",
+          "id": "699acc65-b14e-447e-9665-c30a6d9389f6"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How do you research and map out your clients?",
+          "type": "textarea",
+          "id": "c8e7c5e1-22c2-4857-bedd-a3c3801262c2"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How do you approach \"slow\" weeks?",
+          "type": "textarea",
+          "id": "9700f4fe-7b1f-4a57-915e-10fa32ea3ee5"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Tell me about a time a deal went sideways",
+          "type": "textarea",
+          "id": "49118e16-7fa2-4448-a5d7-2bfb9c400bd6"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What kind of sales environment do you thrive in?",
+          "type": "textarea",
+          "id": "962b6892-f25f-48ba-b1a3-a1e227e43701"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How would you approach selling multiple products?",
+          "type": "textarea",
+          "id": "03a42227-895e-4377-bfbd-c47c7b2354f0"
+        }
+      ],
+      "createdAt": 1731609025310,
+      "stage": null,
+      "updatedAt": 1731609025310
+    },
+    {
+      "id": "d56bd957-1080-4c78-b4df-1a6ae33ef075",
+      "text": "AE Focus area: Programmatic Consulting",
+      "group": {
+        "id": "be55e677-9ee1-45e0-a152-a10b5e48fd36",
+        "name": "AE Hiring "
+      },
+      "instructions": "Interviewer: Stephen/Anthony (US), Jamie (UK)\nPriorities\nAbility to break down a complex problem into small pieces and solve it\nAbility to build on a foundation to engage in creative problem solving\nExperience dealing with unhappy clients – understood the root cause of the issue and addressed it\nDrives client to results and not a passive responder to issues\nFocuses on the \"why\" before the \"how\" - before telling customer “how” to achieve something, ensures a deep understanding of why a customer wants to achieve it\nOCD behavior (obsessive customer delivery) - relentlessly drives customers to achieve goals and advocates internally on their behalf\nHow they interact and collaborate with internal teams such as PC, Measurement, and Product\n",
+      "fields": [
+        {
+          "description": "",
+          "required": true,
+          "text": "Rating",
+          "type": "score-system",
+          "id": "d5b0ace5-075c-43a5-aa39-33be745d143c",
+          "prompt": "Select one",
+          "options": [
+            {
+              "text": "4 - Strong Hire",
+              "optionId": "8037f107-8e50-443d-bd96-21c1b56200b6"
+            },
+            {
+              "text": "3 - Hire",
+              "optionId": "1c5c4627-5f63-44e4-9349-b4727a5438de"
+            },
+            {
+              "text": "2 - No Hire",
+              "optionId": "f89c7056-79f7-4e43-af1e-759760bb25bf"
+            },
+            {
+              "text": "1 - Strong No Hire",
+              "optionId": "f853131f-b618-442f-b4ae-f28f9a8baf25"
+            }
+          ]
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What DSPs, SSPs, and DMPs have you worked with?  Have you noticed any unique differences for challenges working with one vs. another?  Are you familiar with any other major DSPs, SSPs, or DMPs?",
+          "type": "textarea",
+          "id": "175bc26b-875d-4eef-b66d-8863a529d3e3"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Platform fee questions:  Clients says they have 100k budget  Client confirms they have spent the entire budget  We only see 80k spend in the SSP report  What are some reasons for the 20k discrepancy?  A: Platform fees  What other fees",
+          "type": "textarea",
+          "id": "1c635494-1878-4bbc-b359-4c4d2ad30788"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Walk me through how you would structure the initial discovery conversation with a new client who wants to start programmatic advertising.",
+          "type": "textarea",
+          "id": "edf1a310-6565-427b-aa32-56659ba7ff80"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Tell me about a time when a campaign went wrong and you were not able to deliver upon the promised specs. What happened? How did you handle this situation internally and with the client?",
+          "type": "textarea",
+          "id": "91870590-ace0-4397-bb6b-68474b48d3a9"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What data providers are you familiar with? What makes them unique?",
+          "type": "textarea",
+          "id": "ad886be7-de06-4f77-b682-310f0c517703"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What is a PMP deal, how would you communicate the benefits to a client?",
+          "type": "textarea",
+          "id": "d0e4b666-e0db-4a60-875c-9ede3ea5c29e"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Describe a situation where you had to say 'no' to a client request. How did you handle it?",
+          "type": "textarea",
+          "id": "38d92e0e-dd12-4142-9861-131cc8dd827b"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Tell me about a time when you helped a client pivot their programmatic strategy. What was your process?",
+          "type": "textarea",
+          "id": "be6d965e-3294-4bf0-bc57-0fc237870c9e"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "A client's campaign has only spent 15% of their budget by the halfway point. How would you approach this situation?",
+          "type": "textarea",
+          "id": "3b164ea9-765e-45d8-8d7f-bd1419e2a71e"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How do you handle situations where internal and client priorities conflict?",
+          "type": "textarea",
+          "id": "01ecf79b-9777-4895-8461-9af79a89ae7c"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Walk me through your biggest win that you could not have had without someone on internal support team (PC, RM, Product) being intimately involved",
+          "type": "textarea",
+          "id": "5c0e6e07-cc20-427a-ae4f-819475f4276c"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How do you handle situations where a cross-functional project is falling behind schedule due to delays from another team?",
+          "type": "textarea",
+          "id": "4219af55-c5a7-49ce-b940-1e5b298d798a"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How do you use historical data to predict future trends or make projections for a client?",
+          "type": "textarea",
+          "id": "03a7f11a-b5b0-4064-a73d-b07e73366a41"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Where do you see the programmatic industry headed in the next 5 years?",
+          "type": "textarea",
+          "id": "1274142f-50fd-4f4e-bb9d-7c78982d4ab1"
+        }
+      ],
+      "createdAt": 1731609458872,
+      "stage": null,
+      "updatedAt": 1767216907952
+    },
+    {
+      "id": "a2920ab5-a788-4f27-8c66-2e771422fced",
+      "text": "AE Focus area: Technical",
+      "group": {
+        "id": "be55e677-9ee1-45e0-a152-a10b5e48fd36",
+        "name": "AE Hiring "
+      },
+      "instructions": "Priorities\nAble to articulate the value of data in diverse client scenarios\nExperience and/or grasp of measurement sales \nExperience with complex enterprise sales\nFamiliarity with programmatic media & ad tech ecosystem\nProven ability to project manage cross-functionally\n",
+      "fields": [
+        {
+          "description": "",
+          "required": true,
+          "text": "Rating",
+          "type": "score-system",
+          "id": "5bdb285d-9320-413d-b45c-1e72ced7764c",
+          "prompt": "Select one",
+          "options": [
+            {
+              "text": "4 - Strong Hire",
+              "optionId": "d4c30ca1-c328-4c8b-bedf-0b796fd9bf48"
+            },
+            {
+              "text": "3 - Hire",
+              "optionId": "9a4625c3-b5bd-4a07-bbb2-d787750bd997"
+            },
+            {
+              "text": "2 - No Hire",
+              "optionId": "89f01abc-2d39-4d3b-af8a-b5905ca917cc"
+            },
+            {
+              "text": "1 - Strong No Hire",
+              "optionId": "f857c1a4-bb4c-42ae-858a-51ba18d9a440"
+            }
+          ]
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What's the true ROI of your product you’re selling now? If you were in your customer’s shoes, would you buy it? What would be the smart way to buy your product vs how you normally price/position it?",
+          "type": "textarea",
+          "id": "8f196eac-a11c-4cf5-84b6-c7590978eaeb"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Who is your best customer? Why?",
+          "type": "textarea",
+          "id": "9ddcefab-cbd7-435e-b139-1f28b10e78b2"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What’s a better value? Superbowl Ad or YouTube take over? What information do you need? Make assumptions about the costs and let's see how you approach this question?",
+          "type": "textarea",
+          "id": "6ad2cb40-4643-47f7-b40d-a1763c9ba304"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Can you explain what a PMP is and the difference between a standard PMP and PG PMP?",
+          "type": "textarea",
+          "id": "624f0939-e897-485f-9be7-0a192d6a96bd"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Can you explain how 1P data might be onboarded to use for digital media targeting?",
+          "type": "textarea",
+          "id": "644752b2-a44f-416b-8ee2-c3e35a7f90d3"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What does a cross device identity solution do and what are some ways it is typically built?",
+          "type": "textarea",
+          "id": "4a2180ee-8962-4a20-9a32-f2e33d4e6b67"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What are some close loop attribution solutions that you have worked with in the past?",
+          "type": "textarea",
+          "id": "df999d4a-390d-4524-971d-6b0fe762f5d0"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What does ACR stand for and how does it work?",
+          "type": "textarea",
+          "id": "89a08593-7f52-412a-8651-70169bd93f28"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Who is your smartest customer? Why?",
+          "type": "textarea",
+          "id": "b9d0a3b9-f0bb-4120-a4b2-e89478456254"
+        }
+      ],
+      "createdAt": 1731609025310,
+      "stage": null,
+      "updatedAt": 1731609025310
+    },
+    {
+      "id": "f36269dd-9783-4013-8424-dbb3f1ab5fdd",
+      "text": "AE HM: Focus area: Character & Communication",
+      "group": {
+        "id": "be55e677-9ee1-45e0-a152-a10b5e48fd36",
+        "name": "AE Hiring "
+      },
+      "instructions": "Interviewer: Hiring Manager\nPriorities\nDemonstrates empathy, emotional intelligence and ability to \"read the room\"\nLeads with positivity, scrappiness & growth mindset\nPersistent & proactive with a strong work ethic\nPossesses honesty & integrity & loyalty\nThrives in a fast-paced & frequently changing environment\nAbility to influence stakeholders at both client & agency -- both senior & day to day\nOperates well in a team environment & able to motivate others\nSeen by external partners as a trusted advisor\nStrong presentation skills with unique voice/storytelling ability\nSeems to communicate with a sense of urgency, high energy person when having convo\n",
+      "fields": [
+        {
+          "description": "",
+          "required": true,
+          "text": "Rating",
+          "type": "score-system",
+          "id": "5bdb285d-9320-413d-b45c-1e72ced7764c",
+          "prompt": "Select one",
+          "options": [
+            {
+              "text": "4 - Strong Hire",
+              "optionId": "d4c30ca1-c328-4c8b-bedf-0b796fd9bf48"
+            },
+            {
+              "text": "3 - Hire",
+              "optionId": "9a4625c3-b5bd-4a07-bbb2-d787750bd997"
+            },
+            {
+              "text": "2 - No Hire",
+              "optionId": "89f01abc-2d39-4d3b-af8a-b5905ca917cc"
+            },
+            {
+              "text": "1 - Strong No Hire",
+              "optionId": "f857c1a4-bb4c-42ae-858a-51ba18d9a440"
+            }
+          ]
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How would you benchmark your work ethic relative to your peers? What are you doing that others are not? What are people doing that you’re not?",
+          "type": "textarea",
+          "id": "3783cd5a-b46e-497a-9a63-47baab847dd7"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What is your revenue attainment for the last 4 quarters? Looking backwards, what do you regret not doing differently? What are you learning about yourself, your market and your team?",
+          "type": "textarea",
+          "id": "01508a1a-296c-414e-8feb-8bbcf32d7b36"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Walk me through how you have used measurement insights to sell through to a brand direct.",
+          "type": "textarea",
+          "id": "be0bc9ff-6896-4a59-bfca-12eb6a7cc11d"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Hardest deal to win ever? Hardest loss ever?",
+          "type": "textarea",
+          "id": "6843b5bf-bf1d-4c67-b6c8-78d5c9be98f4"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Who is the hardest working seller in your competitive set?",
+          "type": "textarea",
+          "id": "bc7989e5-6290-4fb0-b590-86f79b77b197"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "If candidate has management responsibility: What would they say you're good at, where could you improve / have improved?",
+          "type": "textarea",
+          "id": "6ef8d426-eea2-4ff5-ba7d-f60651da39ee"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What are 3 adjectives a client would use to describe you?",
+          "type": "textarea",
+          "id": "1ee89f39-762b-4e5a-9309-3521fb7c1adb"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Where are your best relationships? If you were to come here, who would be the first person you call? (for consideration: ask to speak with these people)",
+          "type": "textarea",
+          "id": "d9327fa2-c885-41f4-95b6-a3bbe2625019"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What are some of your favorite questions to ask clients before you work with them? Describe a tough customer that you won over. How did you do it?",
+          "type": "textarea",
+          "id": "9d4f6d01-719c-43f6-ae85-924a87eb1c7e"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What are some of the bigger obstacles you’ve had in life, how have you overcome them and how are they shaping your approach to life and work?",
+          "type": "textarea",
+          "id": "128d813e-ccff-42cb-8080-69a69ce6c811"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What do you hope to make if everything goes well next year? If you had the opportunity to double that amount, what kind of lifestyle changes would you make from your current situation? What are you willing to do to make that much or more?",
+          "type": "textarea",
+          "id": "aa2b8960-b6f4-4644-9619-2d815ae6b95c"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Tell me something you’ve taught yourself in the last six months. What resources did you use?",
+          "type": "textarea",
+          "id": "653e9a4c-2ecf-46a3-8adc-e4d2d9678b42"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Tell me about your favorite boss? What was that working relationship like? Tell me about your least favorite boss dynamic? What was that like?",
+          "type": "textarea",
+          "id": "1788cdb8-d778-4514-a776-81d83213a2ff"
+        }
+      ],
+      "createdAt": 1731609025310,
+      "stage": null,
+      "updatedAt": 1731609025310
+    },
+    {
+      "id": "a370a3e4-4fa7-45c9-94ce-057881bfb0f4",
+      "text": "AE: Focus area: Enablement",
+      "group": {
+        "id": "be55e677-9ee1-45e0-a152-a10b5e48fd36",
+        "name": "AE Hiring "
+      },
+      "instructions": "Able to articulate their approach to every stage of the sales cycle\nExperience as a hunter \nExperience with complex enterprise sales\nProven ability to customer-centric and solutions oriented\nProven ability to sell multiple-products\n",
+      "fields": [
+        {
+          "description": "",
+          "required": true,
+          "text": "Rating",
+          "type": "score-system",
+          "id": "cdec2b24-c241-446d-bcab-83ebcbca6173",
+          "prompt": "Select one",
+          "options": [
+            {
+              "text": "4 - Strong Hire",
+              "optionId": "f9a1f0e7-6a28-47cb-90a1-362699663af0"
+            },
+            {
+              "text": "3 - Hire",
+              "optionId": "b34176dd-29e6-41e3-ac36-5158f273d500"
+            },
+            {
+              "text": "2 - No Hire",
+              "optionId": "7b21e2d4-6b9f-4727-ae80-cdc8c53990bd"
+            },
+            {
+              "text": "1 - Strong No Hire",
+              "optionId": "1ea94566-81fe-4f72-9bff-9e9520027e94"
+            }
+          ]
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What is/was the split of warm vs. cold accounts at [employer]?",
+          "type": "textarea",
+          "id": "8daccc99-7b54-404e-ae5d-e3d12a097180"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Walk me through how you cracked into a cold account, including your process, the tactics you used and the key results",
+          "type": "textarea",
+          "id": "7cee036e-b0a0-463e-92ff-b27ecf140518"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What’s your method for prospecting? Research, writing, channels etc.",
+          "type": "textarea",
+          "id": "35e99f70-a916-4a69-a1c5-98575e688205"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "It’s halfway through the month, and you’re below where you need to be to meet your quota. What action do you take during the second half of the month to ensure you reach your targets? (Cite an example)",
+          "type": "textarea",
+          "id": "6c4b101e-6b88-4df3-8e1c-6023b524a4a9"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Every salesperson has a losing streak. Walk me through a recent one and how you turned it around?",
+          "type": "textarea",
+          "id": "f02286d9-45f0-46f1-bb26-d6e0ff391e6a"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What’s your least favorite part of the sales process?",
+          "type": "textarea",
+          "id": "49498d04-10af-4d01-b0ac-5cce29e64a14"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "The biggest deal they ever sourced themselves and closed: how did you do it?",
+          "type": "textarea",
+          "id": "87769870-ff79-49de-9972-6d15af6156af"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "You’re meeting with the research lead at a brand for the first time. What three discovery questions would you ask?",
+          "type": "textarea",
+          "id": "daf355b1-820a-408c-9fa6-e6d463c8470e"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "What’s the best way to establish a relationship with a prospect?",
+          "type": "textarea",
+          "id": "d51441b4-333d-414b-bf13-c87549ed8340"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "How do you keep up to date on your target market?",
+          "type": "textarea",
+          "id": "09eada93-0544-4e7f-bf77-830d61f2c2d8"
+        },
+        {
+          "description": "",
+          "required": true,
+          "text": "Tell me about an objection you had trouble overcoming over the phone. How did you finally move the deal forward?",
+          "type": "textarea",
+          "id": "c207487d-5c08-43fc-bc4b-6ce65ed6fcf0"
+        }
+      ],
+      "createdAt": 1731609817369,
+      "stage": null,
+      "updatedAt": 1731609817369
+    }
+  ],
+  "hasNext": true,
+  "next": "%5B%22Algorithms%22%2C%22014cfee2-bd6a-47c7-9adf-796ad22b3e32%22%5D"
+}

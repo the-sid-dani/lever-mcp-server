@@ -1,0 +1,4 @@
+{
+  "code": "UnauthorizedError",
+  "message": "Invalid or expired API key."
+}
