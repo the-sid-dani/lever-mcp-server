@@ -1,4 +1,4 @@
-# Rate Limiting with Claude Desktop
+# Rate Limiting
 
 ## How It Works
 
@@ -7,7 +7,7 @@ The rate limiting is implemented entirely within the MCP server, making it compl
 ### Architecture
 
 ```
-Claude Desktop → MCP Protocol → Cloudflare Worker (with Rate Limiting) → Lever API
+Claude Desktop → MCP Protocol → Cloud Run (Lever MCP Server with Rate Limiting) → Lever API
 ```
 
 ### What Claude Desktop Sees
@@ -78,8 +78,11 @@ The rate limiting happens automatically behind the scenes!
 
 Watch the logs to see rate limiting in action:
 ```bash
-npx wrangler tail --format pretty
+gcloud logging read 'resource.type=cloud_run_revision AND resource.labels.service_name=lever-mcp' \
+  --project=ai-workflows-459123 --limit=50 --format=json
 ```
+
+You can also use Cloud Logging in the GCP console: https://console.cloud.google.com/logs with a service filter on `lever-mcp`.
 
 You'll see:
 - Token bucket managing request flow
