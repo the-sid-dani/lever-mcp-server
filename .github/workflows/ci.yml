@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -37,6 +39,22 @@ jobs:
 
       - name: Test (vitest run — full suite)
         run: npm test
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Docker build dry-run
+        run: docker buildx build --target production -t lever-mcp:ci-dry-run .
+        continue-on-error: false
+
+      - name: Secret scan (TruffleHog — verified PR diff)
+        if: github.event_name == 'pull_request'
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --only-verified --fail
 
       # --- Soft gates (report-only until M3a cleanup) ---
       # The codebase has pre-existing biome lint errors + format issues

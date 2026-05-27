@@ -85,6 +85,38 @@ app.get("/health", (_req: Request, res: Response) => {
 	});
 });
 
+// Readiness check endpoint for dependency availability
+app.get("/readyz", async (_req: Request, res: Response) => {
+	const checks = {
+		leverApiKey: process.env.LEVER_API_KEY ? "ok" : "missing",
+		jwks: "skipped",
+	};
+
+	if (isOAuthEnabled()) {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 2_000);
+
+		try {
+			const response = await fetch(`${OAUTH_CONFIG.auth0Issuer}/.well-known/jwks.json`, {
+				method: "HEAD",
+				signal: controller.signal,
+			});
+
+			checks.jwks = response.ok ? "ok" : "degraded";
+		} catch {
+			checks.jwks = "degraded";
+		} finally {
+			clearTimeout(timeout);
+		}
+	}
+
+	const ready = checks.leverApiKey === "ok" && checks.jwks !== "degraded";
+	res.status(ready ? 200 : 503).json({
+		status: ready ? "ready" : "not_ready",
+		checks,
+	});
+});
+
 // RFC 9728 - OAuth 2.0 Protected Resource Metadata
 app.get("/.well-known/oauth-protected-resource", (req: Request, res: Response) => {
 	const protocol = req.headers["x-forwarded-proto"] || req.protocol;
