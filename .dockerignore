@@ -18,7 +18,5 @@ docs
 .claude
 .tldr
 .tldrignore
-wrangler.jsonc
-worker-configuration.d.ts
 cloudbuild.yaml
 .gcloudignore

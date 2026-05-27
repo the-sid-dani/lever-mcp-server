@@ -217,21 +217,17 @@ app.get("/sse", (_req: Request, res: Response) => {
 
 // Start server
 app.listen(PORT, () => {
-	const authMode = isOAuthEnabled() ? "OAuth 2.1 (Auth0)" : "Cloud Run IAM";
-	console.log(`
-╔════════════════════════════════════════════════════════════╗
-║             ${`LEVER MCP SERVER v${SERVER_VERSION}`.padEnd(47)}║
-╠════════════════════════════════════════════════════════════╣
-║  Status:    Running                                        ║
-║  Port:      ${PORT.toString().padEnd(45)}║
-║  Auth:      ${authMode.padEnd(44)}║
-╠════════════════════════════════════════════════════════════╣
-║  Endpoints:                                                ║
-║    GET  /health                  - Health check            ║
-║    GET  /.well-known/oauth-...   - OAuth metadata          ║
-║    ALL  /mcp                     - MCP Streamable HTTP     ║
-╚════════════════════════════════════════════════════════════╝
-	`);
+	console.log(
+		JSON.stringify({
+			event: "server_started",
+			service: "lever-mcp-server",
+			version: SERVER_VERSION,
+			port: PORT,
+			authMode: isOAuthEnabled() ? "OAuth 2.1 (Auth0)" : "Cloud Run IAM",
+			endpoints: ["/health", "/.well-known/oauth-protected-resource", "/mcp"],
+			mcpProtocolVersion: MCP_PROTOCOL_VERSION,
+		}),
+	);
 });
 
 // Graceful shutdown
