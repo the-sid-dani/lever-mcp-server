@@ -261,37 +261,6 @@ function registerCandidateTools(server: McpServer, client: LeverClient): void {
 		}
 	);
 
-	server.tool(
-		"lever_add_note",
-		"Add a note to a candidate's profile",
-		{
-			opportunity_id: z.string().describe("The opportunity/candidate ID"),
-			note: z.string().describe("The note content"),
-			author_email: z.string().optional().describe("Email of the note author"),
-		},
-		async (params): Promise<McpToolResponse> => {
-			trace("lever_add_note", "START", params);
-
-			try {
-				const result = await client.addNote(params.opportunity_id, params.note, params.author_email);
-
-				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({ success: true, message: "Note added successfully", data: result }, null, 2),
-					}],
-				};
-			} catch (error) {
-				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-					}],
-				};
-			}
-		}
-	);
-
 	// lever_archive_candidate is in additional-tools.ts with enhanced parameters
 }
 
