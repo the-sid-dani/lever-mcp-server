@@ -304,23 +304,6 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 	);
 
 	server.tool(
-		"lever_get_stages",
-		"Get all pipeline stages",
-		{},
-		async (): Promise<McpToolResponse> => {
-			trace("lever_get_stages", "START");
-
-			const stages = await client.getStages();
-			return {
-				content: [{
-					type: "text",
-					text: JSON.stringify(stages, null, 2),
-				}],
-			};
-		}
-	);
-
-	server.tool(
 		"lever_find_postings_by_owner",
 		"Find job postings by owner name or ID",
 		{
