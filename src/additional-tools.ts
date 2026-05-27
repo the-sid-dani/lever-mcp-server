@@ -1230,4 +1230,71 @@ export function registerAdditionalTools(
 			}
 		},
 	);
+
+	// lever_list_feedback — VAL-017 (M1.7)
+	// List all filled-out feedback forms on a candidate.
+	server.tool(
+		"lever_list_feedback",
+		{
+			opportunity_id: z.string().describe("Opportunity ID to list feedback for"),
+			limit: z.number().default(100).describe("Max forms per request (Lever max 100)"),
+		},
+		async (args) => {
+			try {
+				const allFeedback: any[] = [];
+				let offset: string | undefined;
+				let batchesFetched = 0;
+				const maxBatches = 5;
+
+				while (batchesFetched < maxBatches) {
+					const response = await client.getOpportunityFeedback(args.opportunity_id, {
+						limit: args.limit,
+						offset,
+					});
+
+					if (response.data && response.data.length > 0) {
+						allFeedback.push(...response.data);
+					}
+
+					batchesFetched++;
+
+					if (!response.hasNext || !response.next) break;
+					offset = response.next;
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								count: allFeedback.length,
+								feedback: allFeedback.map((fb: any) => ({
+									id: fb.id,
+									text: fb.text || "",
+									user: fb.user || null,
+									interview: fb.interview || null,
+									panel: fb.panel || null,
+									template: fb.baseTemplateId || fb.template || null,
+									createdAt: fb.createdAt || null,
+									completedAt: fb.completedAt || null,
+									fields: fb.fields || [],
+								})),
+							}, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
 }
