@@ -1057,4 +1057,67 @@ export function registerAdditionalTools(
 			}
 		},
 	);
+
+	// lever_list_notes — VAL-014 (M1.7) — list all notes on a candidate
+	server.tool(
+		"lever_list_notes",
+		{
+			opportunity_id: z.string().describe("Opportunity ID to list notes for"),
+			limit: z.number().default(100).describe("Max notes per request (Lever max 100)"),
+		},
+		async (args) => {
+			try {
+				const allNotes: any[] = [];
+				let offset: string | undefined;
+				let batchesFetched = 0;
+				const maxBatches = 5;
+
+				while (batchesFetched < maxBatches) {
+					const response = await client.getNotes(args.opportunity_id, {
+						limit: args.limit,
+						offset,
+					});
+
+					if (response.data && response.data.length > 0) {
+						allNotes.push(...response.data);
+					}
+
+					batchesFetched++;
+
+					if (!response.hasNext || !response.next) break;
+					offset = response.next;
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								count: allNotes.length,
+								notes: allNotes.map((note: any) => ({
+									id: note.id,
+									value: note.value || "",
+									user: note.user || null,
+									secret: !!note.secret,
+									createdAt: note.createdAt || null,
+									deletedAt: note.deletedAt || null,
+								})),
+							}, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
 }
