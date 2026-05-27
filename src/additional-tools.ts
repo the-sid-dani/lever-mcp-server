@@ -1297,4 +1297,49 @@ export function registerAdditionalTools(
 			}
 		},
 	);
+
+	// lever_get_feedback — VAL-018 (M1.7) — read a specific feedback form in full
+	server.tool(
+		"lever_get_feedback",
+		{
+			opportunity_id: z.string().describe("Opportunity ID the feedback belongs to"),
+			feedback_id: z.string().describe("Feedback form ID to fetch"),
+		},
+		async (args) => {
+			try {
+				const response = await client.getFeedback(args.opportunity_id, args.feedback_id);
+				const fb: any = response.data || {};
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								id: fb.id,
+								text: fb.text || "",
+								instructions: fb.instructions || "",
+								user: fb.user || null,
+								interview: fb.interview || null,
+								panel: fb.panel || null,
+								template: fb.baseTemplateId || fb.template || null,
+								createdAt: fb.createdAt || null,
+								completedAt: fb.completedAt || null,
+								fields: fb.fields || [],
+							}, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
 }
