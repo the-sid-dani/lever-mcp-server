@@ -1,0 +1,336 @@
+# scaffold-engineering-project spec for Lever MCP Server v3 Refactor (ATF-476)
+#
+# Run with:
+#   python ~/.claude/skills/scaffold-engineering-project/scripts/scaffold.py --spec scaffold-spec.yaml --validate-only
+#   python ~/.claude/skills/scaffold-engineering-project/scripts/scaffold.py --spec scaffold-spec.yaml
+
+# ===== Project metadata =====
+
+project_name: Lever MCP Server v3 Refactor
+project_prefix: Lever-MCP
+project_owner: Sid Dani
+project_goal: "Refactor lever-mcp-server to ship feedback submission tools, modernize the auth path to multi-tenant Auth0 + Google Workspace SSO restricted to @samba.tv, eliminate accumulated tech debt since v1, and align with MCP spec 2025-11-25."
+audience: "Samba employees with Lever ATS access — Talent Acquisition team (Jordan Lowe + TA partners), hiring managers, recruiters. Primary user today: Sid (single-tenant); multi-tenant unlocked in v3 M3b."
+project_status_line: "v3 design locked 2026-05-26. v1 (ATF-435) shipped + live in production. Refactor scoped, ready to execute pending Auth0 IT ticket."
+architecture_summary: "Express on GCP Cloud Run (us-central1), MCP SDK 1.29, OAuth 2.1 via Auth0 (Google Workspace Enterprise Connection, @samba.tv-only), Streamable HTTP transport, calling Lever REST API v1. Auth0 issues audience-bound bearer tokens; server validates via JWKS, resolves authenticated email → Lever user ID, attaches as perform_as on writes. Single Cloud Run service, atomic revision deploys, per-milestone rollback via traffic-split."
+
+phases:
+  - { label: "v1 LIVE", color: green }
+  - { label: "v3 DESIGNED — BUILD PENDING", color: yellow }
+  - { label: "IT TICKET FILED", color: yellow }
+  - { label: "MULTI-TENANT UNLOCK PENDING", color: neutral }
+
+out_of_scope:
+  - "Webhook ingestion sink — M6 ships registration only; sink is a separate future project"
+  - "MCP session persistence across Cloud Run revision swaps — move to Redis/Firestore only if multi-user use grows real"
+  - "Repo migration from personal github.com/the-sid-dani to Samba org — separate housekeeping project"
+  - "Observability beyond M5's structured-logging baseline (Cloud Monitoring dashboard, SLO alerting, p95 tracking) — separate future project"
+  - "Cloudflare Access for SaaS as Auth0 alternative — evaluated, rejected for v3 due to Dynamic Client Registration gap; revisit later"
+
+# ===== Repo + deployment =====
+
+repo_url: https://github.com/the-sid-dani/lever-mcp-server
+live_url: https://lever-mcp-201626763325.us-central1.run.app/mcp
+
+# ===== Atlassian targets =====
+
+epic_key: ATF-476
+cloud_id: a5cee046-a800-4f1a-b616-5eeabc98f82d
+project_key: ATF
+assignee_account_id: 712020:49e85272-34f5-4d10-8231-c73576caa486   # Sid Dani
+team_uuid: 77854ec1-e7a3-4095-92bc-a7684ef10979                    # AI Task Force
+ai_category: Infrastructure & Tools                                 # MCP server = middleware/infrastructure (matches gong-mcp, workspace-mcp, sf-mcp pattern)
+label: lever-mcp-v3
+
+confluence_space_id: "14288191609"                                  # ATF space
+confluence_parent_id: "14810349647"                                 # 05 - Engineering Projects
+hub_page_title: Lever MCP Server v3 Refactor
+
+# ===== Documents to publish =====
+# Paths relative to THIS spec file's directory (the lever-mcp-server repo root).
+
+design_doc:
+  path: system-design.md
+  title: Lever MCP Server — System Design (v3 Refactor)
+
+extra_children: []   # No extras for v3 — system-design.md is comprehensive. Existing docs/*.md are v1-era reference material, intentionally left out of Confluence for now.
+
+# ===== Slices (14 milestones from system-design.md §9) =====
+# Letter mapping:
+#   A = M0a    B = M0b    C = M1    D = M1.5
+#   E = M2     F = M2.5   G = M2.6  H = M3a
+#   I = M3b    J = M4     K = M5    L = M6
+#   M = M7     N = M8 (optional)
+
+slices:
+  - letter: A
+    summary: "[Lever-MCP] Slice A (M0a): Pre-flight local — WIP triage, fixtures, log analysis, rollback tag, IT ticket filed"
+    sd_sections: ["2 current state", "10 tigers 1-3", "12 operational runbook"]
+    what_to_build:
+      - "Read + classify the 117-line unstaged WIP diff across `src/index.ts`, `src/additional-tools.ts`, and `src/lever/client.ts`. Confirmed by analysis 2026-05-26 to be a half-finished `lever_get_users` feature + opportunity owner-name expansion. Stash decisions per chunk (commit / drop / port-to-live-path in M1)."
+      - "Capture probe-response fixtures from the 2026-05-22 Lever API probe into `test-fixtures/lever-api/` so M4 can assert against real data shapes."
+      - "Run Cloud Run traffic-log analysis to identify top-N most-used tools: `gcloud logging read 'resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"lever-mcp\"' --limit 1000 --freshness 30d --format json | jq -r '.[].textPayload' | grep -oE 'lever_[a-z_]+' | sort | uniq -c | sort -rn`. Top 5 by call count become the M4 test target."
+      - "Tag current state as `pre-refactor-2026-05-22` for rollback safety: `git tag pre-refactor-2026-05-22 && git push --tags`."
+      - "File Samba IT ticket for Auth0 provisioning (per system-design.md §4 Auth0 setup requirements). Surfaces M0b dependency to IT side."
+    ac_items:
+      - "WIP diff classified into commit/drop/port-buckets, documented in a `M0a-wip-classification.md` (deleted after M1 finishes)"
+      - "`test-fixtures/lever-api/` populated with at least 5 representative API response shapes (opportunities list, feedback templates list, users list, webhooks list, single opportunity expand=owner)"
+      - "Top 5 most-called tools identified + recorded in `M0a-top-tools.md`"
+      - "Rollback tag `pre-refactor-2026-05-22` pushed to origin"
+      - "IT ticket filed in Atlassian Service Desk with link captured in M0a notes"
+    blocked_by_letter: null
+    slice_type: AFK
+
+  - letter: B
+    summary: "[Lever-MCP] Slice B (M0b): Auth0 IT gate — tenant + Application + Google Workspace connection + creds delivered"
+    sd_sections: ["4 auth model", "4 Auth0 setup requirements"]
+    what_to_build:
+      - "**This is the IT-side gate, not engineer work.** Samba IT provisions the Auth0 tenant (or uses existing) per the requirements in system-design.md §4. Slice closes when credentials are delivered + smoke-tested."
+      - "Verify on receipt: hit `https://<domain>/.well-known/oauth-authorization-server` — should return metadata with `code_challenge_methods_supported: [\"S256\"]` AND `authorization_response_iss_parameter_supported: true`."
+      - "Verify defense-in-depth: attempt login with a non-@samba.tv Google account — must reject at the Google Workspace Enterprise Connection layer."
+    ac_items:
+      - "Auth0 tenant provisioned (free tier sufficient for v1)"
+      - "API created with audience = `https://lever-mcp-201626763325.us-central1.run.app`, RS256, 12h token lifetime"
+      - "Application created — Regular Web App, PKCE S256 only, public client (Token Endpoint Auth Method = None)"
+      - "Dynamic Client Registration enabled at tenant level"
+      - "Google Workspace Enterprise Connection configured, restricted to samba.tv domain"
+      - "Post-Login Action rejects non-@samba.tv emails (defense in depth)"
+      - "**Resource Parameter Compatibility Profile** enabled in Tenant Settings > Advanced (RFC 8707 — off by default in Auth0)"
+      - "**`authorization_response_iss_parameter_supported: true`** set via Management API (RFC 9207 — off by default)"
+      - "Token claims include `email`, `email_verified`, `hd`, `name`, `sub`"
+      - "Credentials delivered: AUTH0_DOMAIN, AUTH0_AUDIENCE, AUTH0_ISSUER, JWKS URL, DCR registration endpoint URL, Application client_id"
+      - "Smoke tests pass: metadata endpoint returns expected fields; non-@samba.tv login rejected"
+    blocked_by_letter: A
+    blocked_by_note: "needs the IT ticket filed in Slice A. Parallel-track unlock — Sid spins up personal/dev Auth0 tenant alongside to keep M3b unblocked while IT delivers."
+    slice_type: HITL
+    notes:
+      - "Estimated IT SLA: 1-4 weeks based on Samba historical Auth0 turnaround. Tiger 4 mitigation: if SLA slips past 2 weeks, M3b develops against dev tenant; M7 atomic-swaps env vars to prod tenant."
+
+  - letter: C
+    summary: "[Lever-MCP] Slice C (M1): Dead-code purge + MCP SDK 1.25→1.29 + port lever_get_users WIP to live path"
+    sd_sections: ["2 current state", "3 source tree v1→v3", "8 v3 additions"]
+    what_to_build:
+      - "Delete `src/index.ts` (1,322 LOC of Cloudflare Workers McpAgent code, never imported by live code). Verify zero imports first: `grep -rn \"from.*['\\\"]./index['\\\"]\" src/` returns nothing."
+      - "Before deletion, **port the `lever_get_users` tool registration** from `src/index.ts:953-1015` to `src/additional-tools.ts` (or its v3 home in `tools/reference.ts` if M3a runs first). The underlying client methods `getUsers()` + `getUser()` already exist in WIP in `src/lever/client.ts` (working code, commit as part of this slice)."
+      - "Bump `@modelcontextprotocol/sdk` from `^1.25.0` to `^1.29.0` in `package.json`. Run `npm install && npm run type-check`. Same major version — no breaking changes expected."
+      - "Commit the opportunity owner-name expansion (from WIP) — `expand=[\"owner\"]` on getOpportunities + getOpportunity calls, with formatter changes in `additional-tools.ts`."
+    ac_items:
+      - "`src/index.ts` deleted; `git grep \"index\\.ts\"` shows no references"
+      - "`lever_get_users` tool live in production, callable via MCP"
+      - "Opportunity responses surface owner name (not just UUID)"
+      - "`npm run type-check` passes"
+      - "Auth middleware test still passes"
+      - "`package.json` version bumped to `2.1.0`"
+      - "Deployed to Cloud Run; smoke test of one tool (`lever_list_open_roles`) returns 200"
+    blocked_by_letter: A
+    blocked_by_note: "needs the WIP classification from M0a (Tiger 2 resolution)"
+    slice_type: AFK
+
+  - letter: D
+    summary: "[Lever-MCP] Slice D (M1.5): MCP protocol 2025-06-18 → 2025-11-25 compliance audit"
+    sd_sections: ["5 MCP protocol compliance"]
+    what_to_build:
+      - "Audit the codebase against MCP spec 2025-11-25 deltas from 2025-06-18: RFC 8707 resource parameter (server-side audience validation), RFC 9207 iss parameter (validate iss matches expected issuer), PKCE S256 (hard-MUST verification — server should reject `plain` PKCE), Client ID Metadata Documents support (decide adopt or stay on DCR)."
+      - "Update `MCP_PROTOCOL_VERSION` constant in `src/server.ts:26` from `2025-06-18` to `2025-11-25` once audit passes."
+      - "Document any compliance gaps that don't get fixed in this slice (push to a later slice or to out-of-scope list)."
+    ac_items:
+      - "Server-side audience validation confirmed in `src/auth/middleware.ts` — `aud` claim must equal `https://lever-mcp-201626763325.us-central1.run.app`"
+      - "iss validation added — verify token `iss` claim matches `AUTH0_ISSUER` env var"
+      - "PKCE S256 enforced at Auth0 Application level (no code change needed; Application config check)"
+      - "Client ID Metadata Documents decision recorded in `system-design.md` decision log — adopt or defer to a future slice"
+      - "`MCP_PROTOCOL_VERSION = \"2025-11-25\"` in `src/server.ts`"
+      - "Existing Claude.ai connector session reconnects cleanly after deploy (verify with one live tool call)"
+      - "Compliance audit report committed as `docs/mcp-compliance-2025-11-25.md`"
+    blocked_by_letter: C
+    blocked_by_note: "depends on M1 dead-code purge to minimize surface audited"
+    slice_type: AFK
+
+  - letter: E
+    summary: "[Lever-MCP] Slice E (M2): Repo docs reality-check (README + CLAUDE.md + ARCHITECTURE.md)"
+    sd_sections: ["2 current state", "3 architecture"]
+    what_to_build:
+      - "Rewrite `README.md` to describe the actual architecture (Express + Cloud Run + Streamable HTTP + OAuth 2.1 via Auth0), not the stale Cloudflare Workers description from the v1 era. Reference `system-design.md` as the canonical architecture spec."
+      - "Rewrite `CLAUDE.md` (in-repo) to match. Add a 'Live tool inventory' table."
+      - "Create `ARCHITECTURE.md` with the request-flow diagram (ASCII or mermaid) + auth-chain failure recovery doc from `system-design.md` §12 operational runbook."
+      - "Reconcile `Dockerfile` vs `cloudbuild.yaml` — document which one is the live build path; remove or annotate the other if both stay."
+    ac_items:
+      - "README.md no longer mentions Cloudflare Workers / Durable Objects / wrangler / SSE"
+      - "CLAUDE.md (repo) updated, references system-design.md"
+      - "ARCHITECTURE.md created with request-flow diagram + failure recovery section"
+      - "Dockerfile + cloudbuild.yaml roles documented or one removed"
+      - "All three docs reference Confluence hub page URL + Jira Epic ATF-476"
+    blocked_by_letter: null
+    slice_type: AFK
+
+  - letter: F
+    summary: "[Lever-MCP] Slice F (M2.5): GitHub Actions CI — type-check + test + lint on every PR"
+    sd_sections: ["7 deployment model"]
+    what_to_build:
+      - "Create `.github/workflows/ci.yml` that runs on `pull_request` and `push` to main: install deps, run `npm run type-check`, run `npm test`, run `npm run lint` (add a basic biome lint script if not present)."
+      - "Configure required status checks on the `main` branch so PRs cannot merge without passing CI."
+    ac_items:
+      - "CI workflow file committed at `.github/workflows/ci.yml`"
+      - "Workflow runs successfully on a test PR (type-check + test + lint all pass)"
+      - "Branch protection: `main` requires CI to pass before merge"
+      - "Badge added to README.md showing CI status"
+    blocked_by_letter: null
+    slice_type: AFK
+
+  - letter: G
+    summary: "[Lever-MCP] Slice G (M2.6): Deploy automation — Cloud Build or GitHub Action for Cloud Run deploy"
+    sd_sections: ["7 deployment model"]
+    what_to_build:
+      - "Decide between Cloud Build trigger (existing `cloudbuild.yaml`) vs new GitHub Action `.github/workflows/deploy.yml` for Cloud Run deploys. Document choice in ARCHITECTURE.md."
+      - "If GitHub Action: configure Workload Identity Federation for GitHub → GCP auth (no JSON service-account keys)."
+      - "Wire deploy to fire on push to `main` (or on tag, if you prefer manual gating)."
+      - "Add per-milestone tagging: each milestone commit gets a `m1`, `m1.5`, ..., `m7` git tag so rollback can target the previous-milestone revision precisely."
+    ac_items:
+      - "Deploy automation live — push to main produces a new Cloud Run revision automatically"
+      - "Deploy logs visible in either Cloud Build history or GitHub Actions"
+      - "Rollback path documented: `gcloud run services update-traffic lever-mcp --to-revisions=<previous>=100 --region=us-central1`"
+      - "Per-milestone git tags scheme documented in ARCHITECTURE.md"
+    blocked_by_letter: E
+    blocked_by_note: "depends on M2 ARCHITECTURE.md for the deploy-path doc"
+    slice_type: AFK
+
+  - letter: H
+    summary: "[Lever-MCP] Slice H (M3a): File split — tools/ + lever/ domain modules, NO auth wiring"
+    sd_sections: ["3 source tree v3 target"]
+    what_to_build:
+      - "Split `src/tools.ts` + `src/additional-tools.ts` + `src/interview-tools.ts` into domain-grouped files under `src/tools/`: `search.ts`, `candidates.ts`, `applications.ts`, `interviews.ts`, `requisitions.ts`, `reference.ts`. New `src/tools/index.ts` exports `registerAllTools` and dispatches to each group."
+      - "Split `src/lever/client.ts` into core + helpers: keep `client.ts` for core HTTP wrapping (< 400 LOC), extract `client-pagination.ts` for pagination helpers, extract `client-ratelimit.ts` for the rate-limit token bucket (**singleton — exported once, imported by all callers; never reconstructed per file**)."
+      - "**Do NOT add `perform_as` resolver or Auth0 wiring in this slice** — that's M3b. M3a is pure mechanical split, no behavior change."
+      - "Process: one tool group at a time, each its own commit. Type-check + deploy + smoke between groups."
+    ac_items:
+      - "All files under 400 LOC after split"
+      - "`src/tools/{search,candidates,applications,interviews,requisitions,reference}.ts` exist, each owning the tools listed in system-design.md §3"
+      - "`src/lever/{client,client-pagination,client-ratelimit}.ts` exist"
+      - "Rate-limit token bucket is a module-level singleton in `client-ratelimit.ts`; verified by grep: no `new RateLimiter(` outside that file"
+      - "All 17+ live tools still functional — smoke test 5 most-used (from M0a top-N analysis) returns 200"
+      - "`npm run type-check` passes"
+      - "Deployed to Cloud Run; no behavior regression"
+    blocked_by_letter: C
+    blocked_by_note: "depends on M1 (dead code + lever_get_users on the live path so split has clean target structure)"
+    slice_type: AFK
+
+  - letter: I
+    summary: "[Lever-MCP] Slice I (M3b): perform_as resolver + Auth0 wiring + multi-tenant edge cases + JWKS cache"
+    sd_sections: ["4 v3 multi-tenant", "10 tigers 1+3+6"]
+    what_to_build:
+      - "Create `src/auth/perform-as-resolver.ts` — exports `resolve(email: string) → Promise<string>`. Looks up Lever user via `GET /v1/users?email=<email>&perform_as=<bootstrap-id>`. Returns Lever user ID. Wraps in TTL cache (1h)."
+      - "Critical invariant: when `OAUTH_ENABLED=true` and resolver returns null (email not found in Lever) → **throw `PerformAsUnresolvedError`** with message 'Your Lever account is not provisioned. Contact Talent team.' Do NOT fall back to `LEVER_DEFAULT_USER_ID`. Fallback to default is ONLY for `OAUTH_ENABLED=false` paths (cron jobs, internal callers)."
+      - "Create `src/lever/client-write.ts` — a write-request shim. Reads `perform_as` from the resolver (via request context), attaches as query param on every POST/PUT/DELETE to Lever."
+      - "Update `src/auth/middleware.ts` to use `jose.createRemoteJWKSet` with cooldown for JWKS caching (instead of fetching JWKS per-request)."
+      - "Add `aud` claim validation: must equal `https://lever-mcp-201626763325.us-central1.run.app`. Add `iss` claim validation against `AUTH0_ISSUER` env."
+      - "Develop against the **personal/dev Auth0 tenant** while waiting on prod creds from M0b. Env vars swap at M7."
+    ac_items:
+      - "`src/auth/perform-as-resolver.ts` exists with TTL cache + fail-loud behavior"
+      - "Unit tests cover: cache hit, cache miss + Lever 200, cache miss + Lever 404 (throws PerformAsUnresolvedError), OAUTH_ENABLED=false fallback path"
+      - "`src/lever/client-write.ts` exists; every write tool routes through it"
+      - "JWKS caching via `createRemoteJWKSet` with 5-minute cooldown"
+      - "`aud` + `iss` validation enforced in middleware"
+      - "End-to-end test against dev Auth0 tenant: log in as Sid, submit a feedback to a fake opportunity, verify `perform_as` matches Sid's Lever user ID in the request"
+      - "Negative test: log in with a Google account NOT in Lever (any non-employee test account in dev tenant) — must return 403 with 'Your Lever account is not provisioned' message"
+    blocked_by_letter: H
+    blocked_by_note: "depends on M3a (file split provides clean home for new auth modules). Also depends on M0b for PROD credentials, but unblocked for DEV development via personal Auth0 tenant."
+    slice_type: AFK
+
+  - letter: J
+    summary: "[Lever-MCP] Slice J (M4): Test coverage for top-N tools + Auth0 verifier path tests"
+    sd_sections: ["7 deployment model", "8 tool surface"]
+    what_to_build:
+      - "Set up Vitest if not already present (or extend existing test config). Mock LeverClient via fixtures from `test-fixtures/lever-api/` captured in M0a."
+      - "Write tool tests for top-5 tools from M0a traffic analysis (typically: `lever_advanced_search`, `lever_get_candidate`, `lever_search_candidates`, `lever_list_open_roles`, `lever_manage_interview`). Each test: input shape, happy path, error paths (404, 401, 429 rate-limit), output structure."
+      - "Write Auth0 verifier path tests against `src/auth/middleware.ts`: mock JWKS, valid token passes, expired token fails 401, wrong audience fails 401, missing email claim fails 403, mock the JWKS-cooldown to ensure no per-request JWKS fetches."
+      - "Wire `npm test` to run vitest. M2.5 CI workflow picks this up automatically."
+    ac_items:
+      - "Top-5 tools have happy-path + 3 error-path tests each"
+      - "Auth middleware tests cover JWKS cache, aud/iss validation, expired token, missing claim"
+      - "`npm test` runs all tests; CI passes"
+      - "Test coverage report shows ≥ 70% line coverage in `src/auth/` + `src/lever/client*.ts` + tested tool files"
+    blocked_by_letter: H
+    blocked_by_note: "depends on M3a file split — tests target the new module structure, not the pre-split files"
+    slice_type: AFK
+
+  - letter: K
+    summary: "[Lever-MCP] Slice K (M5): 5 feedback tools + observability (structured logging, latency, error alerting)"
+    sd_sections: ["8 v3 additions feedback", "10 tigers"]
+    what_to_build:
+      - "Implement 5 feedback tools in `src/tools/feedback.ts`:"
+      - "`lever_list_feedback_templates` — `GET /v1/feedback_templates`. Returns `[{id, name, fields:[{id, type, required, label}]}]`. **Must precede submit/update in usage** (Claude needs template + field schemas before populating)."
+      - "`lever_get_feedback` — `GET /v1/opportunities/:opp/feedback/:fb`."
+      - "`lever_list_feedback` — `GET /v1/opportunities/:opp/feedback`."
+      - "`lever_submit_feedback` — `POST /v1/opportunities/:opp/feedback`. Inputs: opportunity ID, template ID, field-values `[{id, value}]`, optional interview_id. Routes via `client-write.ts` for `perform_as`."
+      - "`lever_update_feedback` — `PUT /v1/opportunities/:opp/feedback/:fb`. Same shape as submit."
+      - "Add structured logging (JSON to stdout for Cloud Logging): per tool invocation log `{tool, user_email, perform_as_uuid, opportunity_id, duration_ms, status, error?}`."
+      - "Add per-tool latency histogram (in-process counter exported via `/metrics` endpoint OR Cloud Monitoring custom metric)."
+      - "End-to-end target: Sid says 'Submit feedback for candidate X using the AE Executive template — strong hire, X Y Z.' Claude calls list_templates → finds template → maps prose to field IDs → calls submit → confirms with Lever record link."
+    ac_items:
+      - "All 5 feedback tools registered + callable via MCP"
+      - "Vitest fixture tests for each tool (happy path + 1 error path)"
+      - "Structured logs visible in Cloud Logging with all required fields"
+      - "Latency metric visible (either `/metrics` endpoint or Cloud Monitoring custom metric)"
+      - "End-to-end submit test passes: Sid submits real feedback via Claude to a real Lever opportunity"
+      - "Each feedback tool ships as its own commit + Cloud Run deploy + smoke test"
+    blocked_by_letter: I
+    blocked_by_note: "depends on M3b — feedback tools are write tools, require multi-tenant perform_as resolver"
+    slice_type: AFK
+
+  - letter: L
+    summary: "[Lever-MCP] Slice L (M6): 3 webhook registration tools"
+    sd_sections: ["8 v3 additions webhooks"]
+    what_to_build:
+      - "Implement 3 webhook tools in `src/tools/webhooks.ts`:"
+      - "`lever_list_webhooks` — `GET /v1/webhooks`."
+      - "`lever_register_webhook` — `POST /v1/webhooks`. Inputs: event type (interviewCreated, candidateStageChange, candidateHired, etc.), target URL, optional config. Routes via `client-write.ts`."
+      - "`lever_delete_webhook` — `DELETE /v1/webhooks/:id`."
+      - "Sid can wire Lever events to any inbound URL (webhook.site for testing, future Beru briefing pipeline sink, Zapier inbound)."
+      - "**Out of scope:** webhook ingestion service that persists events. This slice ships registration only."
+    ac_items:
+      - "All 3 webhook tools registered + callable via MCP"
+      - "Vitest fixture tests for each tool"
+      - "End-to-end test: Sid registers a webhook pointed at webhook.site, triggers an event in Lever (e.g., add note), confirms inbound POST arrives at webhook.site"
+      - "Each tool ships as its own commit + Cloud Run deploy + smoke test"
+    blocked_by_letter: I
+    blocked_by_note: "depends on M3b — webhook tools are write tools, require multi-tenant perform_as resolver"
+    slice_type: AFK
+
+  - letter: M
+    summary: "[Lever-MCP] Slice M (M7): API key rotation + prod Auth0 cutover + chat-leaked key invalidated"
+    sd_sections: ["4 auth", "12 operational runbook key rotation"]
+    what_to_build:
+      - "**Atomic swap from dev Auth0 tenant → prod Auth0 tenant.** Single `gcloud run services update` call updates env vars: `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_ISSUER` from dev → prod values delivered in M0b."
+      - "Rotate the Lever API key in the same update: new key from Lever admin (Sid provisions), set as `LEVER_API_KEY` env var. The current key was exposed in chat during M0a scope probe and should be invalidated for hygiene."
+      - "Schedule during low-use window per Tiger 3 mitigation (Cloud Run revision swap drops in-memory MCP sessions; active Claude.ai connectors reconnect transparently but mid-flight tool calls during the swap may see one error before recovery)."
+      - "Verify post-cutover: hit `/health`, call one tool, observe Cloud Run logs for 5 min for any 4xx/5xx anomalies."
+      - "In Lever admin, invalidate the OLD API key."
+      - "Update local dev env file (`~/.second-brain-os.env`) if it carries a copy."
+    ac_items:
+      - "Prod Auth0 env vars deployed to Cloud Run service `lever-mcp`"
+      - "New Lever API key deployed; old key invalidated in Lever admin"
+      - "Smoke test passes: `/health` returns 200, `lever_list_open_roles` returns expected list"
+      - "5-minute log observation post-deploy shows no anomalous error rate"
+      - "Old key + Auth0 dev tenant scheduled for cleanup or retained for future testing"
+    blocked_by_letter: K
+    blocked_by_note: "depends on M5 + M6 (the new tools that need the prod Auth0 chain). Also depends on M0b for prod Auth0 credentials."
+    slice_type: HITL
+    notes:
+      - "Tiger 3 mitigation note: Cloud Run revision swap is atomic at the infrastructure layer but session-layer dropoff is ~0-5 sec. Acceptable for the cutover."
+
+  - letter: N
+    summary: "[Lever-MCP] Slice N (M8 optional): Stage management + user tool polish"
+    sd_sections: ["8 v3 additions optional"]
+    what_to_build:
+      - "**Optional milestone.** Decide whether to ship after M5 lands smoothly. If usage validates the need, implement:"
+      - "`lever_move_to_stage` — moves a candidate to a different stage via opportunity update."
+      - "`lever_advance_with_feedback` — composite tool: submits feedback AND advances stage in one call. Common hiring-loop workflow."
+      - "`lever_get_user` — single-user lookup by ID (pairs with `lever_get_users` from M1)."
+    ac_items:
+      - "Decision recorded after M5: ship M8 or close v3 at M7"
+      - "If shipping: all 3 tools registered + tested + deployed"
+      - "If deferred: `system-design.md` decision log updated noting why deferred"
+    blocked_by_letter: K
+    blocked_by_note: "decision made after M5 ships, before starting"
+    slice_type: AFK
+    notes:
+      - "If M5 surfaces unexpected complexity (e.g., feedback template field-type sprawl), M8 likely gets deferred to a future Epic."

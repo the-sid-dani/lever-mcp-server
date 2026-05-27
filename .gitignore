@@ -170,3 +170,10 @@ dist
 
 .dev.vars
 .wrangler/
+
+# Local tooling state (Claude Code skills, bloks/tldr cache, CCw workflow state, autonomous skill state)
+.claude/
+.tldr/
+.tldrignore
+.workflow/
+continuum/
