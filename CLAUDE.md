@@ -260,7 +260,7 @@ The 14-milestone v3 refactor is tracked at [ATF-476](https://sambatv.atlassian.n
 | M1 — Dead code + SDK bump + lever_get_users | ✅ Complete | [ATF-479](https://sambatv.atlassian.net/browse/ATF-479) |
 | M1.5 — MCP protocol 2025-11-25 audit | ⏳ Pending | [ATF-480](https://sambatv.atlassian.net/browse/ATF-480) |
 | M2 — Docs reality-check | ✅ Complete | [ATF-481](https://sambatv.atlassian.net/browse/ATF-481) |
-| M2.5 — GitHub Actions CI | ⏳ Pending | [ATF-482](https://sambatv.atlassian.net/browse/ATF-482) |
+| M2.5 — GitHub Actions CI | ✅ Complete (hard-gate type-check + test; lint/format soft until M3a) | [ATF-482](https://sambatv.atlassian.net/browse/ATF-482) |
 | M2.6 — Deploy automation | ⏳ Pending | [ATF-483](https://sambatv.atlassian.net/browse/ATF-483) |
 | M3a — File split | ⏳ Pending | [ATF-484](https://sambatv.atlassian.net/browse/ATF-484) |
 | M3b — perform_as resolver + Auth0 wiring | ⏳ Blocked on M0b | [ATF-485](https://sambatv.atlassian.net/browse/ATF-485) |
@@ -288,7 +288,7 @@ The 14-milestone v3 refactor is tracked at [ATF-476](https://sambatv.atlassian.n
 1. **Single-tenant `perform_as` until v3 M3b.** Writes attribute to `LEVER_DEFAULT_USER_ID` (Sid). Multi-tenant resolver lands in M3b.
 2. **MCP session state per-container memory.** Cloud Run revision swaps drop active MCP sessions; clients reconnect on next request.
 3. **No webhook ingestion sink.** v3 M6 ships registration only (3 tools). Inbound webhook persistence is a separate future project.
-4. **No automated CI yet.** v3 M2.5 wires GitHub Actions. Until then, contributors must run `npm test` + `npm run type-check` locally before pushing.
+4. **GitHub Actions CI is active.** Type-check and tests are hard gates; lint/format are report-only until M3a cleanup.
 5. **MCP-Protocol-Version pinned at `2025-06-18`.** v3 M1.5 bumps to `2025-11-25` after compliance audit.
 
 ---
@@ -299,4 +299,4 @@ The 14-milestone v3 refactor is tracked at [ATF-476](https://sambatv.atlassian.n
 2. Read [`ARCHITECTURE.md`](./ARCHITECTURE.md) — request flow + failure recovery.
 3. Check the [Confluence hub](https://sambatv.atlassian.net/wiki/spaces/ATF/pages/14838136852) for stakeholder context.
 4. Check the relevant Jira Story under [ATF-476](https://sambatv.atlassian.net/browse/ATF-476) for scope + acceptance criteria.
-5. Old README claims about Cloudflare Workers are wrong. The 2026-02-03 OAuth commit migrated to Express + Cloud Run. If you see `wrangler`, `Durable Objects`, or `/sse` endpoints in code, that's pre-migration debris.
+5. If you find `wrangler`, `Durable Objects`, or `McpAgent` references in code, that's pre-migration debris worth removing. The `/sse` endpoint at `src/server.ts:205` is a deliberate 410-Gone deprecation marker, not debris (remove ~Aug 2026).

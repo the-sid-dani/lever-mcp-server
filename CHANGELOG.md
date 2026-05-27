@@ -5,33 +5,31 @@ All notable changes to the Lever MCP Server project will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Changed
-- **BREAKING**: Major tool consolidation - reduced from 29 to 14 tools
-- **BREAKING**: `lever_search_candidates` now uses `stage_name` parameter instead of `stage`
-- Enhanced `lever_advanced_search` with 8 new parameters for more flexible searching
-- Enhanced `lever_find_candidates_for_role` with stage name filtering
-- Updated system prompt to v2.0 with streamlined tool documentation
-- All stage-related parameters now accept human-readable stage names instead of IDs
+## [2.1.0] — 2026-05-27
 
 ### Added
-- New `lever_update_candidate` tool that consolidates stage updates, tag management, and owner assignment
-- Stage name resolution utility (`src/utils/stage-helpers.ts`) with caching support
-- `addCandidateTags` and `removeCandidateTags` methods in LeverClient
-- Comprehensive testing verification documentation
-- Pull request summary documentation
+- `lever_submit_feedback` for interview feedback submission.
+- `lever_get_stage_history` for candidate stage-change visibility.
+- `lever_get_users` on the live tool path.
+- `lever_get_interview_insights` and consolidated `lever_manage_interview` interview workflows.
+- GitHub Actions CI in `.github/workflows/ci.yml` with hard-gate type-check and test jobs, plus report-only lint/format checks until M3a.
+
+### Changed
+- Consolidated the tool surface from 26 to 17 live tools via the action-enum pattern.
+- Replaced same-resource tool clusters with consolidated tools: `lever_notes` (3→1), `lever_feedback` (4→1), `lever_archive` (3→1), `lever_stages` (2→1), and `lever_requisitions` (2→1).
+- Completed Cloudflare Workers to GCP Cloud Run migration cleanup in docs and runtime assumptions.
+- Hardened production runtime with a singleton `LeverClient` instead of per-session clients.
 
 ### Removed
-- Debug tools: `debug_get_candidate`, `debug_postings`, `debug_opportunities_list`
-- Test tools: `test_lever_connection`, `test_rate_limits`, `verify_api_response`
-- Redundant tools: `lever_find_by_company`, `lever_quick_find_candidate`, `lever_find_candidate_in_posting`
-- Niche tools: `lever_find_internal_referrals_for_role`, `lever_recruiter_dashboard`
-- Superseded tools: `lever_move_candidate_to_stage`, `lever_get_application`
+- Removed remaining Cloudflare Workers-era artifacts: `wrangler.jsonc`, `mcp-tracing-guide.md`, `worker-configuration.d.ts`, `docs/cloudflare-traces.md`, and `docs/cloudflare_subrequest_limits.md`.
 
 ### Fixed
-- Stage ID confusion by supporting human-readable stage names throughout the system
-- Tool redundancy and overlap issues
-- Overwhelming number of tools for users
+- Preserved audit attribution in current single-tenant mode by injecting `LEVER_DEFAULT_USER_ID` through Secret Manager.
+- Fixed container hardening by running the production Docker image as a non-root user.
+
+### Security
+- Moved `LEVER_DEFAULT_USER_ID` handling into managed secret injection for production deploys.
+
+## [Unreleased]
 
 ## [Previous versions...]

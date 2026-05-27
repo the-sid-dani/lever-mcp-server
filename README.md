@@ -12,6 +12,8 @@ A remote [Model Context Protocol](https://modelcontextprotocol.io/) server expos
 
 When a Samba employee asks Claude to "check the candidate status for X" or "submit my interview feedback for Y," Claude calls this MCP server. The server validates the user's OAuth token, resolves their authenticated email to a Lever user record (multi-tenant `perform_as` model — see system-design.md §4), and forwards the request to the Lever REST API with proper audit attribution.
 
+> **Status (as of 2026-05-27):** Single-tenant mode. All write operations attribute to `LEVER_DEFAULT_USER_ID` (Sid). Per-user `perform_as` resolution lands in [M3b](./CLAUDE.md#v3-refactor-in-progress) — JWT validation and email logging are live today, but the email→Lever user ID resolver is not yet wired. Read operations are unaffected.
+
 **Live endpoint:** `https://lever-mcp-201626763325.us-central1.run.app/mcp`
 
 **Tool count:** 17 live tools across search, candidate management, applications/files, interviews, requisitions, reference data, user lookup, and 5 action-enum tools (notes, feedback, archive, stages, requisitions). See [Tools](#tools) below.
@@ -31,7 +33,7 @@ Auth0 (OAuth 2.1 Authorization Server)
 Lever MCP Server (this repo, on GCP Cloud Run us-central1)
    │ - Validates token via Auth0 JWKS (cached via jose.createRemoteJWKSet)
    │ - Extracts email claim from token
-   │ - Resolves email → Lever user ID via perform-as-resolver (TTL cache)
+   │ - Resolves email → Lever user ID via perform-as-resolver (TTL cache) — **M3b, pending**
    │ - Attaches resolved user ID as `perform_as` on writes
    ▼
 Lever ATS REST API (api.lever.co/v1)
