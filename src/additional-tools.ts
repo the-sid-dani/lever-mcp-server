@@ -1457,4 +1457,62 @@ export function registerAdditionalTools(
 			}
 		},
 	);
+	// lever_submit_feedback — M1.8 (partial M5, submit-only, single-tenant)
+	// POST /v1/opportunities/:id/feedback?perform_as=<uuid>
+	// Lever API quirk: POST uses `fieldValues` (NOT `fields` like the GET response).
+	// Submitting with `fields` returns 400 BadRequestError. For score-system fields,
+	// `value` is the option text (e.g., "3 - Yes"), not the option UUID.
+	server.tool(
+		"lever_submit_feedback",
+		{
+			opportunity_id: z.string().describe("Opportunity (candidate) ID to submit feedback for"),
+			base_template_id: z.string().describe("Feedback template UID. Use lever_list_feedback_templates to discover available templates."),
+			field_values: z.array(z.object({
+				id: z.string().describe("Field UID from the template"),
+				value: z.union([z.string(), z.array(z.string())]).describe("Field value. String for most types, array of strings for multiple-select. For score-system fields, use the option text like '3 - Yes' not the option UUID."),
+			})).describe("Array of {id, value} pairs matching the template's required fields"),
+			interview_id: z.string().optional().describe("Interview UID to link feedback to (required if panel_id specified)"),
+			panel_id: z.string().optional().describe("Interview panel UID (required if interview_id specified)"),
+		},
+		async (args) => {
+			try {
+				const performAs = process.env.LEVER_DEFAULT_USER_ID;
+				const result = await client.submitFeedback(
+					args.opportunity_id,
+					args.base_template_id,
+					args.field_values,
+					{
+						interview: args.interview_id,
+						panel: args.panel_id,
+						performAs,
+					},
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								success: true,
+								feedback_id: result?.data?.id,
+								template_text: result?.data?.text,
+								user: result?.data?.user,
+								created_at: result?.data?.createdAt,
+							}, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
 }

@@ -832,4 +832,34 @@ export class LeverClient {
 			queryParams,
 		);
 	}
+
+	async submitFeedback(
+		opportunityId: string,
+		baseTemplateId: string,
+		fieldValues: Array<{ id: string; value: any }>,
+		options?: {
+			interview?: string;
+			panel?: string;
+			performAs?: string;
+		},
+	): Promise<any> {
+		const data: any = {
+			baseTemplateId,
+			fieldValues,
+		};
+		if (options?.interview) data.interview = options.interview;
+		if (options?.panel) data.panel = options.panel;
+
+		const params: any = {};
+		if (options?.performAs) {
+			params.perform_as = options.performAs;
+		}
+
+		return this.makeRequest(
+			"POST",
+			`/opportunities/${opportunityId}/feedback`,
+			Object.keys(params).length > 0 ? params : undefined,
+			data,
+		);
+	}
 }
