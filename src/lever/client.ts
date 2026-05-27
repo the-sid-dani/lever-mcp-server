@@ -741,4 +741,95 @@ export class LeverClient {
 	async getUser(userId: string): Promise<{ data: LeverUser }> {
 		return this.makeRequest<{ data: LeverUser }>("GET", `/users/${userId}`);
 	}
+
+	// Read-only methods for notes, feedback, emails — M1.7 (VAL-013)
+	// Uses `any` for response item types; M3a tightens with proper Lever shapes.
+
+	async getNotes(
+		opportunityId: string,
+		params?: { limit?: number; offset?: string },
+	): Promise<LeverApiResponse<any>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		return this.makeRequest<LeverApiResponse<any>>(
+			"GET",
+			`/opportunities/${opportunityId}/notes`,
+			queryParams,
+		);
+	}
+
+	async getNote(
+		opportunityId: string,
+		noteId: string,
+	): Promise<{ data: any }> {
+		return this.makeRequest<{ data: any }>(
+			"GET",
+			`/opportunities/${opportunityId}/notes/${noteId}`,
+		);
+	}
+
+	async getOpportunityFeedback(
+		opportunityId: string,
+		params?: { limit?: number; offset?: string },
+	): Promise<LeverApiResponse<any>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		return this.makeRequest<LeverApiResponse<any>>(
+			"GET",
+			`/opportunities/${opportunityId}/feedback`,
+			queryParams,
+		);
+	}
+
+	async getFeedback(
+		opportunityId: string,
+		feedbackId: string,
+	): Promise<{ data: any }> {
+		return this.makeRequest<{ data: any }>(
+			"GET",
+			`/opportunities/${opportunityId}/feedback/${feedbackId}`,
+		);
+	}
+
+	async getFeedbackTemplates(params?: {
+		limit?: number;
+		offset?: string;
+	}): Promise<LeverApiResponse<any>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		return this.makeRequest<LeverApiResponse<any>>(
+			"GET",
+			"/feedback_templates",
+			queryParams,
+		);
+	}
+
+	async getEmails(
+		opportunityId: string,
+		params?: { limit?: number; offset?: string },
+	): Promise<LeverApiResponse<any>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		return this.makeRequest<LeverApiResponse<any>>(
+			"GET",
+			`/opportunities/${opportunityId}/emails`,
+			queryParams,
+		);
+	}
 }
