@@ -1120,4 +1120,46 @@ export function registerAdditionalTools(
 			}
 		},
 	);
+
+	// lever_get_note — VAL-015 (M1.7) — drill into a specific note
+	server.tool(
+		"lever_get_note",
+		{
+			opportunity_id: z.string().describe("Opportunity ID the note belongs to"),
+			note_id: z.string().describe("Note ID to fetch"),
+		},
+		async (args) => {
+			try {
+				const response = await client.getNote(args.opportunity_id, args.note_id);
+				const note: any = response.data || {};
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								id: note.id,
+								value: note.value || "",
+								user: note.user || null,
+								secret: !!note.secret,
+								createdAt: note.createdAt || null,
+								deletedAt: note.deletedAt || null,
+								fields: note.fields || null,
+							}, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
 }
