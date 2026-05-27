@@ -1154,114 +1154,118 @@ export function registerAdditionalTools(
 		},
 	);
 
-	// lever_list_feedback_templates — VAL-016 (M1.7)
-	// List all feedback templates available in the org (used by M5 submit flow).
+	// lever_feedback — consolidated (replaces lever_list_feedback_templates + lever_list_feedback + lever_get_feedback + lever_submit_feedback)
+	// CRITICAL: submit action uses `fieldValues[]` write-shape per M1.8 finding (asymmetric with GET response `fields[]`).
 	server.tool(
-		"lever_list_feedback_templates",
+		"lever_feedback",
+		"Read or write interview feedback. Use action='list_templates' to discover available feedback forms, action='list' to fetch all feedback on a candidate, action='get' to fetch one feedback form by id, or action='submit' to submit a filled-out feedback form (single-tenant — attributed via LEVER_DEFAULT_USER_ID).",
 		{
-			limit: z.number().default(100).describe("Max templates per request (Lever max 100)"),
+			action: z.enum(["list_templates", "list", "get", "submit"]).describe(
+				"Operation to perform. list_templates=org-wide feedback templates; list=all feedback on opportunity_id; get=one feedback form by feedback_id; submit=create new feedback for opportunity_id using base_template_id + field_values."
+			),
+			opportunity_id: z.string().optional().describe("Opportunity / candidate ID. Required for actions: list, get, submit."),
+			limit: z.number().default(100).optional().describe("For action='list_templates' or 'list' only — max items per request (Lever max 100, paginated up to 5 batches)."),
+			feedback_id: z.string().optional().describe("For action='get' only — feedback form ID to fetch."),
+			base_template_id: z.string().optional().describe("For action='submit' only — feedback template UID. Use action='list_templates' to discover available templates."),
+			field_values: z.array(z.object({
+				id: z.string().describe("Field UID from the template"),
+				value: z.union([z.string(), z.array(z.string())]).describe("Field value. String for most types, array of strings for multiple-select. For score-system fields, use the option text like '3 - Yes' not the option UUID."),
+			})).optional().describe("For action='submit' only — array of {id, value} pairs matching the template's required fields. Posted to Lever as `fieldValues[]` (write-shape; asymmetric with GET response `fields[]`)."),
+			interview_id: z.string().optional().describe("For action='submit' only — interview UID to link feedback to (required if panel_id specified)."),
+			panel_id: z.string().optional().describe("For action='submit' only — interview panel UID (required if interview_id specified)."),
 		},
 		async (args) => {
 			try {
-				const allTemplates: any[] = [];
-				let offset: string | undefined;
-				let batchesFetched = 0;
-				const maxBatches = 5;
-
-				while (batchesFetched < maxBatches) {
-					const response = await client.getFeedbackTemplates({
-						limit: args.limit,
-						offset,
-					});
-
-					if (response.data && response.data.length > 0) {
-						allTemplates.push(...response.data);
+				switch (args.action) {
+					case "list_templates": {
+						const allTemplates: any[] = [];
+						let offset: string | undefined;
+						let batchesFetched = 0;
+						const maxBatches = 5;
+						while (batchesFetched < maxBatches) {
+							const response = await client.getFeedbackTemplates({
+								limit: args.limit ?? 100,
+								offset,
+							});
+							if (response.data && response.data.length > 0) {
+								allTemplates.push(...response.data);
+							}
+							batchesFetched++;
+							if (!response.hasNext || !response.next) break;
+							offset = response.next;
+						}
+						return {
+							content: [{
+								type: "text",
+								text: JSON.stringify({
+									count: allTemplates.length,
+									templates: allTemplates.map((tpl: any) => ({
+										id: tpl.id,
+										text: tpl.text || tpl.name || "",
+										instructions: tpl.instructions || "",
+										fields: Array.isArray(tpl.fields)
+											? tpl.fields.map((f: any) => ({
+													id: f.id,
+													type: f.type,
+													required: !!f.required,
+													text: f.text || "",
+												}))
+											: [],
+									})),
+								}, null, 2),
+							}],
+						};
 					}
-
-					batchesFetched++;
-
-					if (!response.hasNext || !response.next) break;
-					offset = response.next;
-				}
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								count: allTemplates.length,
-								templates: allTemplates.map((tpl: any) => ({
-									id: tpl.id,
-									text: tpl.text || tpl.name || "",
-									instructions: tpl.instructions || "",
-									fields: Array.isArray(tpl.fields)
-										? tpl.fields.map((f: any) => ({
-											id: f.id,
-											type: f.type,
-											required: !!f.required,
-											text: f.text || "",
-										}))
-										: [],
-								})),
-							}, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						},
-					],
-				};
-			}
-		},
-	);
-
-	// lever_list_feedback — VAL-017 (M1.7)
-	// List all filled-out feedback forms on a candidate.
-	server.tool(
-		"lever_list_feedback",
-		{
-			opportunity_id: z.string().describe("Opportunity ID to list feedback for"),
-			limit: z.number().default(100).describe("Max forms per request (Lever max 100)"),
-		},
-		async (args) => {
-			try {
-				const allFeedback: any[] = [];
-				let offset: string | undefined;
-				let batchesFetched = 0;
-				const maxBatches = 5;
-
-				while (batchesFetched < maxBatches) {
-					const response = await client.getOpportunityFeedback(args.opportunity_id, {
-						limit: args.limit,
-						offset,
-					});
-
-					if (response.data && response.data.length > 0) {
-						allFeedback.push(...response.data);
+					case "list": {
+						if (!args.opportunity_id) throw new Error("opportunity_id is required for action='list'");
+						const allFeedback: any[] = [];
+						let offset: string | undefined;
+						let batchesFetched = 0;
+						const maxBatches = 5;
+						while (batchesFetched < maxBatches) {
+							const response = await client.getOpportunityFeedback(args.opportunity_id, {
+								limit: args.limit ?? 100,
+								offset,
+							});
+							if (response.data && response.data.length > 0) {
+								allFeedback.push(...response.data);
+							}
+							batchesFetched++;
+							if (!response.hasNext || !response.next) break;
+							offset = response.next;
+						}
+						return {
+							content: [{
+								type: "text",
+								text: JSON.stringify({
+									count: allFeedback.length,
+									feedback: allFeedback.map((fb: any) => ({
+										id: fb.id,
+										text: fb.text || "",
+										user: fb.user || null,
+										interview: fb.interview || null,
+										panel: fb.panel || null,
+										template: fb.baseTemplateId || fb.template || null,
+										createdAt: fb.createdAt || null,
+										completedAt: fb.completedAt || null,
+										fields: fb.fields || [],
+									})),
+								}, null, 2),
+							}],
+						};
 					}
-
-					batchesFetched++;
-
-					if (!response.hasNext || !response.next) break;
-					offset = response.next;
-				}
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								count: allFeedback.length,
-								feedback: allFeedback.map((fb: any) => ({
+					case "get": {
+						if (!args.opportunity_id) throw new Error("opportunity_id is required for action='get'");
+						if (!args.feedback_id) throw new Error("feedback_id is required for action='get'");
+						const response = await client.getFeedback(args.opportunity_id, args.feedback_id);
+						const fb: any = response.data || {};
+						return {
+							content: [{
+								type: "text",
+								text: JSON.stringify({
 									id: fb.id,
 									text: fb.text || "",
+									instructions: fb.instructions || "",
 									user: fb.user || null,
 									interview: fb.interview || null,
 									panel: fb.panel || null,
@@ -1269,66 +1273,49 @@ export function registerAdditionalTools(
 									createdAt: fb.createdAt || null,
 									completedAt: fb.completedAt || null,
 									fields: fb.fields || [],
-								})),
-							}, null, 2),
-						},
-					],
-				};
+								}, null, 2),
+							}],
+						};
+					}
+					case "submit": {
+						if (!args.opportunity_id) throw new Error("opportunity_id is required for action='submit'");
+						if (!args.base_template_id) throw new Error("base_template_id is required for action='submit'");
+						if (!args.field_values) throw new Error("field_values is required for action='submit'");
+						const performAs = process.env.LEVER_DEFAULT_USER_ID;
+						const result = await client.submitFeedback(
+							args.opportunity_id,
+							args.base_template_id,
+							args.field_values,
+							{
+								interview: args.interview_id,
+								panel: args.panel_id,
+								performAs,
+							},
+						);
+						return {
+							content: [{
+								type: "text",
+								text: JSON.stringify({
+									success: true,
+									feedback_id: result?.data?.id,
+									template_text: result?.data?.text,
+									user: result?.data?.user,
+									created_at: result?.data?.createdAt,
+								}, null, 2),
+							}],
+						};
+					}
+					default:
+						throw new Error(`Unknown action: ${(args as any).action}`);
+				}
 			} catch (error) {
 				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						},
-					],
-				};
-			}
-		},
-	);
-
-	// lever_get_feedback — VAL-018 (M1.7) — read a specific feedback form in full
-	server.tool(
-		"lever_get_feedback",
-		{
-			opportunity_id: z.string().describe("Opportunity ID the feedback belongs to"),
-			feedback_id: z.string().describe("Feedback form ID to fetch"),
-		},
-		async (args) => {
-			try {
-				const response = await client.getFeedback(args.opportunity_id, args.feedback_id);
-				const fb: any = response.data || {};
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								id: fb.id,
-								text: fb.text || "",
-								instructions: fb.instructions || "",
-								user: fb.user || null,
-								interview: fb.interview || null,
-								panel: fb.panel || null,
-								template: fb.baseTemplateId || fb.template || null,
-								createdAt: fb.createdAt || null,
-								completedAt: fb.completedAt || null,
-								fields: fb.fields || [],
-							}, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						},
-					],
+					content: [{
+						type: "text",
+						text: JSON.stringify({
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					}],
 				};
 			}
 		},
@@ -1430,64 +1417,6 @@ export function registerAdditionalTools(
 									userId: change.userId || null,
 									updatedAt: change.updatedAt || null,
 								})),
-							}, null, 2),
-						},
-					],
-				};
-			} catch (error) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						},
-					],
-				};
-			}
-		},
-	);
-	// lever_submit_feedback — M1.8 (partial M5, submit-only, single-tenant)
-	// POST /v1/opportunities/:id/feedback?perform_as=<uuid>
-	// Lever API quirk: POST uses `fieldValues` (NOT `fields` like the GET response).
-	// Submitting with `fields` returns 400 BadRequestError. For score-system fields,
-	// `value` is the option text (e.g., "3 - Yes"), not the option UUID.
-	server.tool(
-		"lever_submit_feedback",
-		{
-			opportunity_id: z.string().describe("Opportunity (candidate) ID to submit feedback for"),
-			base_template_id: z.string().describe("Feedback template UID. Use lever_list_feedback_templates to discover available templates."),
-			field_values: z.array(z.object({
-				id: z.string().describe("Field UID from the template"),
-				value: z.union([z.string(), z.array(z.string())]).describe("Field value. String for most types, array of strings for multiple-select. For score-system fields, use the option text like '3 - Yes' not the option UUID."),
-			})).describe("Array of {id, value} pairs matching the template's required fields"),
-			interview_id: z.string().optional().describe("Interview UID to link feedback to (required if panel_id specified)"),
-			panel_id: z.string().optional().describe("Interview panel UID (required if interview_id specified)"),
-		},
-		async (args) => {
-			try {
-				const performAs = process.env.LEVER_DEFAULT_USER_ID;
-				const result = await client.submitFeedback(
-					args.opportunity_id,
-					args.base_template_id,
-					args.field_values,
-					{
-						interview: args.interview_id,
-						panel: args.panel_id,
-						performAs,
-					},
-				);
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								success: true,
-								feedback_id: result?.data?.id,
-								template_text: result?.data?.text,
-								user: result?.data?.user,
-								created_at: result?.data?.createdAt,
 							}, null, 2),
 						},
 					],
