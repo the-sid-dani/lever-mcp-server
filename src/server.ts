@@ -147,12 +147,19 @@ app.all("/mcp", async (req: Request, res: Response) => {
 	// Check for existing session
 	const sessionId = req.headers["mcp-session-id"] as string | undefined;
 	let transport: StreamableHTTPServerTransport;
+	let isNewSession = false;
 
 	if (sessionId && transports.has(sessionId)) {
 		// Reuse existing transport
 		transport = transports.get(sessionId)!;
 	} else if (!sessionId && req.method === "POST") {
-		// New session - create transport and server
+		// New session - create transport and server.
+		// NOTE: In MCP SDK 1.29+, transport.sessionId is a lazy getter and
+		// returns undefined until handleRequest() has run. So we cannot capture
+		// the session ID immediately after construction — we capture it AFTER
+		// handleRequest() resolves, in the try block below. (Pre-1.29 behavior
+		// was synchronous; this is a v3-refactor regression fix.)
+		isNewSession = true;
 		transport = new StreamableHTTPServerTransport({
 			sessionIdGenerator: () => randomUUID(),
 		});
@@ -160,20 +167,6 @@ app.all("/mcp", async (req: Request, res: Response) => {
 		// Create and connect MCP server
 		const server = createMcpServer();
 		await server.connect(transport);
-
-		// Store transport for session reuse
-		const newSessionId = transport.sessionId;
-		if (newSessionId) {
-			transports.set(newSessionId, transport);
-
-			// Clean up on close
-			transport.onclose = () => {
-				transports.delete(newSessionId);
-				console.log(`[MCP] Session closed: ${newSessionId}`);
-			};
-
-			console.log(`[MCP] New session: ${newSessionId}`);
-		}
 	} else {
 		// Invalid request
 		res.status(400).json({ error: "Invalid session or request" });
@@ -183,6 +176,23 @@ app.all("/mcp", async (req: Request, res: Response) => {
 	// Handle the request
 	try {
 		await transport.handleRequest(req, res, req.body);
+
+		// AFTER handleRequest, transport.sessionId is populated (lazy getter
+		// resolves during handling). Capture + store for session reuse.
+		if (isNewSession) {
+			const newSessionId = transport.sessionId;
+			if (newSessionId && !transports.has(newSessionId)) {
+				transports.set(newSessionId, transport);
+
+				// Clean up on close
+				transport.onclose = () => {
+					transports.delete(newSessionId);
+					console.log(`[MCP] Session closed: ${newSessionId}`);
+				};
+
+				console.log(`[MCP] New session: ${newSessionId}`);
+			}
+		}
 	} catch (error) {
 		console.error("[MCP] Error handling request:", error);
 		if (!res.headersSent) {
