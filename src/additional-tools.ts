@@ -40,6 +40,17 @@ export function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
 		? new Date(opp.createdAt).toISOString().split("T")[0]
 		: "Unknown";
 
+	// Extract owner/recruiter information
+	let ownerName = "Unassigned";
+	let ownerId = "";
+	if (typeof opp.owner === "object" && opp.owner) {
+		ownerName = opp.owner.name || "Unknown";
+		ownerId = opp.owner.id || "";
+	} else if (typeof opp.owner === "string") {
+		ownerId = opp.owner;
+		ownerName = `User ID: ${opp.owner}`;
+	}
+
 	return {
 		id: opp.id || "",
 		name,
@@ -48,11 +59,12 @@ export function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
 		posting: postingText,
 		location,
 		organizations: opp.headline || "",
+		owner: { id: ownerId, name: ownerName },
 		created: createdDate,
 	};
 }
 
-// Helper to format posting data 
+// Helper to format posting data
 function formatPosting(posting: any): Record<string, any> {
 	// Access location and team from categories object as per API docs
 	const location = posting.categories?.location || "Unknown";

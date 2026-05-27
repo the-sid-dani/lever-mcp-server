@@ -4,6 +4,7 @@ import type {
 	LeverPosting,
 	LeverInterview,
 	LeverPanel,
+	LeverUser,
 } from "../types/lever.js";
 
 // Simple token bucket implementation for rate limiting
@@ -168,11 +169,16 @@ export class LeverClient {
 		origin?: string;
 		limit?: number;
 		offset?: string;
+		expand?: string[];
 	}): Promise<LeverApiResponse<LeverOpportunity>> {
+		// Default expand to include owner so recruiter data is always available
+		const expand = params.expand || ["owner"];
+		const { expand: _ignored, ...restParams } = params;
+
 		const response = await this.makeRequest<LeverApiResponse<LeverOpportunity>>(
 			"GET",
 			"/opportunities",
-			params,
+			{ ...restParams, expand },
 		);
 		
 		// Debug logging
@@ -186,9 +192,11 @@ export class LeverClient {
 	async getOpportunity(id: string): Promise<{ data: LeverOpportunity }> {
 		try {
 			// The API returns { data: opportunity } structure, so we expect that format
+			// Expand owner to get recruiter name instead of just a UUID
 			const response = await this.makeRequest<{ data: LeverOpportunity }>(
 			"GET",
 			`/opportunities/${id}`,
+			{ expand: ["owner"] },
 		);
 			
 			// Check if the API returned null or undefined
@@ -713,17 +721,24 @@ export class LeverClient {
 		await this.makeRequest('DELETE', `opportunities/${opportunityId}/panels/${panelId}`, params);
 	}
 
-	// Note: The following methods are placeholders for functionality that may not be 
-	// directly supported by the Lever API or require additional research:
-	
-	// async getUsers(): Promise<any> {
-	//   // TODO: Implement if/when Lever API provides a users endpoint
-	//   throw new Error("getUsers is not yet implemented - Lever API documentation needed");
-	// }
-	
-	// async updateOpportunityOwner(opportunityId: string, ownerId: string): Promise<any> {
-	//   // TODO: Implement if/when Lever API provides an owner update endpoint
-	//   // The API doesn't seem to have a direct endpoint for updating the owner field
-	//   throw new Error("updateOpportunityOwner is not yet implemented - Lever API may not support this directly");
-	// }
+	async getUsers(params?: {
+		limit?: number;
+		offset?: string;
+		includeDeactivated?: boolean;
+	}): Promise<LeverApiResponse<LeverUser>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		if (params?.includeDeactivated) {
+			queryParams.includeDeactivated = true;
+		}
+		return this.makeRequest<LeverApiResponse<LeverUser>>("GET", "/users", queryParams);
+	}
+
+	async getUser(userId: string): Promise<{ data: LeverUser }> {
+		return this.makeRequest<{ data: LeverUser }>("GET", `/users/${userId}`);
+	}
 }
