@@ -1342,4 +1342,71 @@ export function registerAdditionalTools(
 			}
 		},
 	);
+
+	// lever_list_emails — VAL-019 (M1.7) — read email thread history for a candidate
+	server.tool(
+		"lever_list_emails",
+		{
+			opportunity_id: z.string().describe("Opportunity ID to list emails for"),
+			limit: z.number().default(100).describe("Max emails per request (Lever max 100)"),
+		},
+		async (args) => {
+			try {
+				const allEmails: any[] = [];
+				let offset: string | undefined;
+				let batchesFetched = 0;
+				const maxBatches = 5;
+
+				while (batchesFetched < maxBatches) {
+					const response = await client.getEmails(args.opportunity_id, {
+						limit: args.limit,
+						offset,
+					});
+
+					if (response.data && response.data.length > 0) {
+						allEmails.push(...response.data);
+					}
+
+					batchesFetched++;
+
+					if (!response.hasNext || !response.next) break;
+					offset = response.next;
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								count: allEmails.length,
+								emails: allEmails.map((email: any) => ({
+									id: email.id,
+									subject: email.subject || "",
+									fromContact: email.fromContact || null,
+									to: email.to || [],
+									cc: email.cc || [],
+									bcc: email.bcc || [],
+									body: email.body || email.bodyText || "",
+									user: email.user || null,
+									createdAt: email.createdAt || email.sentAt || null,
+									threadId: email.threadId || null,
+								})),
+							}, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
 }
