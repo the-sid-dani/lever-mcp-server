@@ -2,112 +2,279 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## What this is
 
-This is a Cloudflare Workers-based MCP (Model Context Protocol) server that provides remote access to Lever ATS functionality. It exposes 16 recruiting tools through an SSE endpoint that can be accessed by Claude Desktop or other MCP clients via the mcp-remote proxy.
+A remote MCP (Model Context Protocol) server that exposes the Lever ATS API as tools callable from Claude. Runs on **GCP Cloud Run** (us-central1) behind **OAuth 2.1 via Auth0** federating to Google Workspace SSO restricted to `@samba.tv`.
 
-## Development Commands
+**Canonical architecture spec:** [`system-design.md`](./system-design.md) — 13 sections covering current state, target architecture, multi-tenant auth model, MCP spec 2025-11-25 compliance, operational runbook, decision log. Read it first.
+
+**Live URL:** `https://lever-mcp-201626763325.us-central1.run.app/mcp`
+
+**Active refactor:** Jira Epic [ATF-476](https://sambatv.atlassian.net/browse/ATF-476). 14 Stories (ATF-477 through ATF-490) map to the milestones in system-design.md §9.
+
+---
+
+## Stack
+
+| Component | Value |
+|---|---|
+| Language | TypeScript (Node.js 20+) |
+| HTTP server | Express 4.21 |
+| MCP SDK | `@modelcontextprotocol/sdk` 1.29 |
+| MCP transport | Streamable HTTP |
+| MCP-Protocol-Version | `2025-06-18` (target: `2025-11-25` per M1.5) |
+| JWT validation | `jose` 6 |
+| Schema validation | `zod` 3 |
+| Test runner | Vitest 4 |
+| Linter / formatter | Biome 2 |
+| Deploy target | GCP Cloud Run, region us-central1 |
+| Build | Dockerfile + Cloud Build (`cloudbuild.yaml`) |
+
+**NOT** Cloudflare Workers / Durable Objects / wrangler / SSE. The 2026-02-03 commit (`38e4768`) migrated to Express on Cloud Run. The previous architecture is gone.
+
+---
+
+## Development commands
 
 ```bash
-# Install dependencies
+# Install
 npm install
 
-# Run local development server
+# Local dev (tsx watch, port 8080)
 npm run dev
-# or
-npx wrangler dev
 
-# Type checking
+# Type-check (no emit)
 npm run type-check
 
-# Code formatting
-npm run format
+# Tests (vitest run — full suite)
+npm test
 
-# Linting
+# Watch mode
+npm run test:watch
+
+# Lint + autofix (biome)
 npm run lint:fix
 
-# Deploy to Cloudflare
+# Format
+npm run format
+
+# Deploy (Cloud Build → Cloud Run)
 npm run deploy
-# or use the deployment script
-./deploy.sh
 ```
+
+### Convention: ALWAYS run the full test suite
+
+When making any code change, run `npm test` (full vitest suite), NOT scoped `npm test <path>` or `npm test --grep <name>`. Scoped runs miss regressions in adjacent code. Reference: prior agent reports confirmed this 3x during ATF buildout 2026-05-22.
+
+### Convention: use `mcp__fastedit__fast_edit` for `.ts` files, not `Edit`
+
+A project-level hook may block the `Edit` tool on `.ts` files. Use `mcp__fastedit__fast_edit` instead. If that fails (object literals, multi-statement insertions, files > 150 LOC), fall back to a Python heredoc via `Bash`:
+
+```bash
+python3 <<'PYEOF'
+import pathlib
+path = pathlib.Path("src/foo.ts")
+text = path.read_text()
+# ... mutate text ...
+path.write_text(text)
+PYEOF
+```
+
+Markdown, JSON, YAML, and config files are safe with `Edit`.
+
+---
 
 ## Architecture
 
-### Core Components
+### Source tree
 
-1. **src/index.ts** - Main entry point defining the LeverMCP class
-   - Extends McpAgent from the agents library
-   - Implements SSE/MCP endpoints for remote access
-   - Handles routing: `/sse`, `/mcp`, `/health`
-   - Initializes tools in `init()` method
+```
+src/
+├── server.ts                 # Cloud Run entry, Express setup, MCP transport wiring
+├── tools.ts                  # registerAllTools — dispatch to additional + interview tools
+├── additional-tools.ts       # 16+ tool registrations (split into src/tools/ in v3 M3a)
+├── interview-tools.ts        # 2 interview-specific tool registrations
+├── lever/
+│   └── client.ts             # LeverClient — REST wrapper, rate limit, pagination
+├── auth/
+│   ├── middleware.ts         # JWT validation, OAUTH_ENABLED toggle, Cloud Run IAM fallback
+│   ├── metadata.ts           # OAuth 2.0 Protected Resource Metadata endpoint
+│   ├── constants.ts
+│   ├── types.ts
+│   └── index.ts
+├── types/lever.ts            # Lever API response type definitions
+└── utils/stage-helpers.ts
+```
 
-2. **src/lever/client.ts** - HTTP client for Lever API
-   - Handles authentication, rate limiting, and pagination
-   - All API calls go through this client
+### Request flow
 
-3. **src/additional-tools.ts** - Extended tool definitions
-   - Implements 7 additional tools to complete the 16-tool set
-   - Includes quick search, file listing, and application management
+```
+Claude (MCP client)
+  └─OAuth 2.1 flow→ Auth0 (AS)
+                      └─Google Workspace IdP (samba.tv-restricted)
+                          ↓ Bearer JWT (RS256, audience-bound)
+                       Lever MCP Server (this codebase, Cloud Run)
+                          - Validate JWT via Auth0 JWKS (cached)
+                          - Extract email claim
+                          - Resolve email → Lever user ID (perform_as)
+                          - Forward to Lever REST API
+```
 
-4. **src/types/lever.ts** - TypeScript type definitions for Lever API responses
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full diagram + auth-chain failure recovery procedures.
 
-### Tool Organization
+### Auth model (single-tenant today, multi-tenant in v3 M3b)
 
-Tools are grouped into three categories in index.ts:
-- **Search Tools**: `lever_advanced_search`, `lever_find_by_company`
-- **Candidate Tools**: `lever_get_candidate`, `lever_add_note`, `lever_archive_candidate`
-- **Utility Tools**: `lever_list_open_roles`, `lever_get_stages`, `lever_get_archive_reasons`, `lever_find_candidates_for_role`
+- **`OAUTH_ENABLED=true`** (default in production): JWT validation via Auth0 JWKS. Server reads `email` claim and (in v3 M3b+) resolves to a Lever user ID for `perform_as`.
+- **`OAUTH_ENABLED=false`** (local dev, cron jobs, internal callers): Cloud Run IAM gating at infrastructure layer. Server attaches `LEVER_DEFAULT_USER_ID` as `perform_as` on writes.
 
-Additional tools in additional-tools.ts:
-- **Basic Search**: `lever_search_candidates`, `lever_quick_find_candidate`
-- **Posting-specific**: `lever_find_candidate_in_posting`, `lever_find_internal_referrals_for_role`
-- **File/Application Management**: `lever_list_files`, `lever_list_applications`, `lever_get_application`
+**Critical invariant (v3+):** `LEVER_DEFAULT_USER_ID` is NEVER used as a fallback for authenticated requests. Authenticated-but-unmatched MUST fail loud with "Your Lever account is not provisioned." Otherwise an unprovisioned user gets writes attributed to Sid (attribution + compliance bug).
 
-### Key Implementation Details
+---
 
-1. **Rate Limiting**: Built into the Lever client (not visible in current code, likely in client.ts)
-2. **Error Handling**: Each tool wraps responses in try-catch blocks
-3. **Data Formatting**: `formatOpportunity()` standardizes candidate data for consistent output
-4. **Pagination**: Handled automatically by the client with 100-item page limits
-5. **Authentication**: Uses LEVER_API_KEY from Cloudflare secrets
+## Live tool inventory (18 tools, post-M1)
 
-### Deployment Configuration
+**Search & discovery (5):** `lever_advanced_search`, `lever_search_candidates`, `lever_search_archived_candidates`, `lever_find_postings_by_owner`, `lever_list_open_roles`
 
-- **wrangler.jsonc**: Cloudflare Workers configuration
-  - Uses Durable Objects for stateful MCP connections
-  - Node.js compatibility enabled
-  - Observability enabled for monitoring
+**Candidate management (4):** `lever_get_candidate`, `lever_update_candidate`, `lever_add_note`, `lever_archive_candidate`
 
-- **Environment**: Requires `LEVER_API_KEY` secret set via Wrangler
+**Application / files (2):** `lever_list_applications`, `lever_list_files`
 
-### Known Limitations
+**Interview (2):** `lever_manage_interview`, `lever_get_interview_insights`
 
-1. **No Text Search**: Lever API doesn't support query parameters on `/opportunities` endpoint
-   - Name searches fetch candidates then filter client-side
-   - Limited to 100-1000 candidates for performance
+**Requisitions (2):** `lever_list_requisitions`, `lever_get_requisition_details`
 
-2. **File Access**: Files cannot be downloaded through MCP
-   - Tools only list file metadata
-   - Users must access files through Lever web interface
+**Reference data (2):** `lever_get_stages`, `lever_get_archive_reasons`
 
-3. **No Write Operations for Applications**: 
-   - Cannot create applications or change stages via API
-   - Only notes and archiving are supported write operations
+**User lookup (1) — new in v3 M1:** `lever_get_users`
+
+Tool registrations live in `src/additional-tools.ts` (16) and `src/interview-tools.ts` (2). The v3 M3a milestone splits these into domain-grouped files under `src/tools/`.
+
+---
+
+## Lever API integration
+
+### `perform_as` is required on every write
+
+Every POST/PUT in Lever v1 API requires `perform_as=<user-uuid>` as a query param or body field. Without it, returns `400 BadRequestError: Missing required parameter: perform_as`. Probe-verified 2026-05-22.
+
+Routing for writes (v3 M3b+):
+1. Authenticated request → resolver maps `email` claim → Lever user ID → attach as `perform_as`
+2. Unauthenticated context (cron, internal) → attach `LEVER_DEFAULT_USER_ID` (env)
+3. Resolver returns null AND auth enabled → throw `PerformAsUnresolvedError`
+
+### Rate limiting
+
+Lever v1 rate-limits at ~10 req/sec per API key. The client (`src/lever/client.ts`) implements a token bucket. **Critical invariant in v3 M3a file split:** the token bucket MUST be a singleton imported by all callers. Module-local state per file = 4x effective rate = 429 storms.
+
+### Endpoints used
+
+See [system-design.md §6](./system-design.md#lever-api-integration) for the full table.
+
+---
+
+## Adding a new tool
+
+1. **Identify the right home:** which existing tool file groups by domain match? (After v3 M3a: `src/tools/{search,candidates,applications,interviews,requisitions,reference,feedback,webhooks}.ts`.)
+2. **Add the client method first** in `src/lever/client.ts` (or a future `src/lever/client-write.ts` for writes). Implement pagination + rate-limit-aware retry.
+3. **Register the tool** with `server.tool(name, zodSchema, async (args) => {...})`. Use the pattern in `additional-tools.ts` (NOT the `this.server.tool` pattern — that was the dead Cloudflare Workers McpAgent code, deleted in v3 M1).
+4. **For writes:** route through the write helper that attaches `perform_as`. Do NOT call `this.client.makeRequest("POST", ...)` directly.
+5. **Add fixtures:** capture a real probe response (PII-scrubbed) into `test-fixtures/lever-api/responses/` OR write a synthetic fixture matching the documented Lever shape.
+6. **Add a vitest test** in `src/__tests__/` mocking `LeverClient`. Cover happy path + 2-3 error paths.
+7. **Run `npm test` (full suite)** + `npm run type-check`. Must pass.
+
+---
 
 ## Testing
 
-Currently no automated tests. Manual testing process:
-1. Deploy to Cloudflare Workers
-2. Use MCP Inspector: `npx @modelcontextprotocol/inspector@latest`
-3. Connect to: `https://lever-mcp-remote.YOUR-SUBDOMAIN.workers.dev/sse`
-4. Test each tool with valid/invalid inputs
+```bash
+npm test         # vitest run (full suite, exits on first failure)
+npm run test:watch
+```
 
-## Adding New Tools
+Current tests: `src/auth/__tests__/middleware.test.ts` (8 tests). Tool-level tests land in v3 M4 — fixtures already captured in `test-fixtures/lever-api/`.
 
-To add a new tool:
-1. Define it in the appropriate `register*Tools()` method in index.ts
-2. Use `this.server.tool()` with Zod schema for parameters
-3. Call the Lever API through `this.client`
-4. Format responses consistently using `formatOpportunity()` or similar
-5. Handle errors gracefully with informative messages
+---
+
+## Deployment
+
+### Production
+
+```bash
+npm run deploy
+# → gcloud builds submit --config cloudbuild.yaml
+# → builds Docker image
+# → deploys new Cloud Run revision
+# → atomic traffic split to new revision
+```
+
+Env vars are set via Cloud Run service config (NOT in `.env` files in production):
+
+- `LEVER_API_KEY` — Lever admin > Integrations & API. Rotated in v3 M7.
+- `LEVER_DEFAULT_USER_ID` — Sid's Lever user UUID. Fallback only (see auth model above).
+- `OAUTH_ENABLED=true`
+- `AUTH0_ISSUER_URL`, `AUTH0_AUDIENCE` — set in v3 M0b after IT delivers the prod Auth0 tenant.
+
+### Rollback
+
+```bash
+gcloud run revisions list --service lever-mcp --region us-central1
+gcloud run services update-traffic lever-mcp \
+  --to-revisions=<previous-revision>=100 \
+  --region us-central1
+```
+
+Pre-refactor tag `pre-refactor-2026-05-22` available as the absolute fallback.
+
+---
+
+## v3 refactor in progress
+
+The 14-milestone v3 refactor is tracked at [ATF-476](https://sambatv.atlassian.net/browse/ATF-476). Working branch: `refactor/v3`.
+
+| Milestone | Status | Story |
+|---|---|---|
+| M0a — Pre-flight | ✅ Complete | [ATF-477](https://sambatv.atlassian.net/browse/ATF-477) |
+| M0b — Auth0 IT gate | ⏳ Pending Samba IT | [ATF-478](https://sambatv.atlassian.net/browse/ATF-478) |
+| M1 — Dead code + SDK bump + lever_get_users | ✅ Complete | [ATF-479](https://sambatv.atlassian.net/browse/ATF-479) |
+| M1.5 — MCP protocol 2025-11-25 audit | ⏳ Pending | [ATF-480](https://sambatv.atlassian.net/browse/ATF-480) |
+| M2 — Docs reality-check | ✅ Complete | [ATF-481](https://sambatv.atlassian.net/browse/ATF-481) |
+| M2.5 — GitHub Actions CI | ⏳ Pending | [ATF-482](https://sambatv.atlassian.net/browse/ATF-482) |
+| M2.6 — Deploy automation | ⏳ Pending | [ATF-483](https://sambatv.atlassian.net/browse/ATF-483) |
+| M3a — File split | ⏳ Pending | [ATF-484](https://sambatv.atlassian.net/browse/ATF-484) |
+| M3b — perform_as resolver + Auth0 wiring | ⏳ Blocked on M0b | [ATF-485](https://sambatv.atlassian.net/browse/ATF-485) |
+| M4 — Test coverage | ⏳ Pending | [ATF-486](https://sambatv.atlassian.net/browse/ATF-486) |
+| M5 — 5 feedback tools | ⏳ Blocked on M3b | [ATF-487](https://sambatv.atlassian.net/browse/ATF-487) |
+| M6 — 3 webhook tools | ⏳ Blocked on M3b | [ATF-488](https://sambatv.atlassian.net/browse/ATF-488) |
+| M7 — Prod cutover + key rotation | ⏳ Blocked on M5/M6/M0b | [ATF-489](https://sambatv.atlassian.net/browse/ATF-489) |
+| M8 (optional) — Stage + user polish | ⏳ Pending | [ATF-490](https://sambatv.atlassian.net/browse/ATF-490) |
+
+---
+
+## Conventions
+
+- **Branch:** active work on `refactor/v3`, PRs against `main`.
+- **Commits:** one assertion per commit. Commit messages reference the relevant Story (e.g., `Refs: ATF-479 (M1)`).
+- **Tests must pass before commit** (`npm test` + `npm run type-check`).
+- **Deploy is separate from commit** — pushing to main does NOT auto-deploy. Manual `npm run deploy` until v3 M2.6 lands deploy automation.
+- **No emojis in code comments, commit messages, or docs.** Tables and bullets only.
+- **`perform_as` is non-negotiable on writes.** Every write tool routes through the helper. No direct `client.makeRequest("POST", ...)` calls outside the helper.
+
+---
+
+## Known limitations
+
+1. **Single-tenant `perform_as` until v3 M3b.** Writes attribute to `LEVER_DEFAULT_USER_ID` (Sid). Multi-tenant resolver lands in M3b.
+2. **MCP session state per-container memory.** Cloud Run revision swaps drop active MCP sessions; clients reconnect on next request.
+3. **No webhook ingestion sink.** v3 M6 ships registration only (3 tools). Inbound webhook persistence is a separate future project.
+4. **No automated CI yet.** v3 M2.5 wires GitHub Actions. Until then, contributors must run `npm test` + `npm run type-check` locally before pushing.
+5. **MCP-Protocol-Version pinned at `2025-06-18`.** v3 M1.5 bumps to `2025-11-25` after compliance audit.
+
+---
+
+## When you're confused
+
+1. Read [`system-design.md`](./system-design.md) — canonical architecture spec.
+2. Read [`ARCHITECTURE.md`](./ARCHITECTURE.md) — request flow + failure recovery.
+3. Check the [Confluence hub](https://sambatv.atlassian.net/wiki/spaces/ATF/pages/14838136852) for stakeholder context.
+4. Check the relevant Jira Story under [ATF-476](https://sambatv.atlassian.net/browse/ATF-476) for scope + acceptance criteria.
+5. Old README claims about Cloudflare Workers are wrong. The 2026-02-03 OAuth commit migrated to Express + Cloud Run. If you see `wrangler`, `Durable Objects`, or `/sse` endpoints in code, that's pre-migration debris.
