@@ -1162,4 +1162,72 @@ export function registerAdditionalTools(
 			}
 		},
 	);
+
+	// lever_list_feedback_templates — VAL-016 (M1.7)
+	// List all feedback templates available in the org (used by M5 submit flow).
+	server.tool(
+		"lever_list_feedback_templates",
+		{
+			limit: z.number().default(100).describe("Max templates per request (Lever max 100)"),
+		},
+		async (args) => {
+			try {
+				const allTemplates: any[] = [];
+				let offset: string | undefined;
+				let batchesFetched = 0;
+				const maxBatches = 5;
+
+				while (batchesFetched < maxBatches) {
+					const response = await client.getFeedbackTemplates({
+						limit: args.limit,
+						offset,
+					});
+
+					if (response.data && response.data.length > 0) {
+						allTemplates.push(...response.data);
+					}
+
+					batchesFetched++;
+
+					if (!response.hasNext || !response.next) break;
+					offset = response.next;
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								count: allTemplates.length,
+								templates: allTemplates.map((tpl: any) => ({
+									id: tpl.id,
+									text: tpl.text || tpl.name || "",
+									instructions: tpl.instructions || "",
+									fields: Array.isArray(tpl.fields)
+										? tpl.fields.map((f: any) => ({
+											id: f.id,
+											type: f.type,
+											required: !!f.required,
+											text: f.text || "",
+										}))
+										: [],
+								})),
+							}, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
+				};
+			}
+		},
+	);
 }
