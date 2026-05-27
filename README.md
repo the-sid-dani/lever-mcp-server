@@ -14,7 +14,7 @@ When a Samba employee asks Claude to "check the candidate status for X" or "subm
 
 **Live endpoint:** `https://lever-mcp-201626763325.us-central1.run.app/mcp`
 
-**Tool count:** 18 live tools across search, candidate management, applications/files, interviews, requisitions, reference data, and user lookup. See [Tools](#tools) below.
+**Tool count:** 17 live tools across search, candidate management, applications/files, interviews, requisitions, reference data, user lookup, and 5 action-enum tools (notes, feedback, archive, stages, requisitions). See [Tools](#tools) below.
 
 ---
 
@@ -147,39 +147,65 @@ npx @modelcontextprotocol/inspector
 
 ## Tools
 
-18 tools registered (post-M1 refactor). See [system-design.md §8](./system-design.md#tool-surface-v1--v3) for the canonical inventory.
+17 tools registered (post-consolidation). See [system-design.md §8](./system-design.md#tool-surface-v1--v3) for the canonical inventory.
 
-**Search & discovery (5)**
+**Search & discovery (4)**
 
-`lever_advanced_search`, `lever_search_candidates`, `lever_search_archived_candidates`, `lever_find_postings_by_owner`, `lever_list_open_roles`
+`lever_advanced_search`, `lever_search_candidates`, `lever_find_postings_by_owner`, `lever_list_open_roles`
 
-**Candidate management (4)**
+**Candidate management (2)**
 
-`lever_get_candidate`, `lever_update_candidate`, `lever_add_note`, `lever_archive_candidate`
+`lever_get_candidate`, `lever_update_candidate`
 
-**Application / files (2)**
+**Application / files / emails (3)**
 
-`lever_list_applications`, `lever_list_files`
+`lever_list_applications`, `lever_list_files`, `lever_list_emails`
 
 **Interview (2)**
 
 `lever_manage_interview`, `lever_get_interview_insights`
 
-**Requisitions (2)**
-
-`lever_list_requisitions`, `lever_get_requisition_details`
-
-**Reference data (3)**
-
-`lever_list_open_roles`, `lever_get_stages`, `lever_get_archive_reasons`
-
-**User lookup (1) — new in v3 M1**
+**User lookup (1)**
 
 `lever_get_users`
 
-Planned for v3 M5 (5 feedback tools): `lever_list_feedback_templates`, `lever_get_feedback`, `lever_list_feedback`, `lever_submit_feedback`, `lever_update_feedback`.
+**Notes (1) — `lever_notes(action)`**
 
-Planned for v3 M6 (3 webhook tools): `lever_list_webhooks`, `lever_register_webhook`, `lever_delete_webhook`.
+- `action="list"` — fetch all notes on a candidate
+- `action="get"` — fetch one note by id
+- `action="add"` — create a new note (single-tenant — attributed via `LEVER_DEFAULT_USER_ID`)
+
+**Feedback (1) — `lever_feedback(action)`**
+
+- `action="list_templates"` — discover available feedback forms org-wide
+- `action="list"` — all feedback on a candidate
+- `action="get"` — one feedback form by id
+- `action="submit"` — submit a filled-out form (single-tenant — uses `fieldValues[]` write-shape per Lever API)
+
+**Archive (1) — `lever_archive(action)`**
+
+- `action="list_reasons"` — discover valid archive reason IDs
+- `action="archive"` — archive a candidate
+- `action="search"` — query archived candidates by posting / date range / recruiter / reason
+
+**Stages (1) — `lever_stages(action)`**
+
+- `action="list"` — fetch all pipeline stages
+- `action="history"` — stage-change history for a specific opportunity
+
+**Requisitions (1) — `lever_requisitions(action)`**
+
+- `action="list"` — fetch requisitions with optional filters (status, code, date, confidentiality)
+- `action="get"` — fetch full details for one requisition by Lever UUID or external code (smart lookup)
+
+### Why action-enum tools?
+
+Reduces schema-token overhead ~30-40% vs the prior 26-tool registry (consolidated 2026-05-27, commits `17951ea`...`71d999c`). Same-resource operations share one tool, dispatched by `action` enum. Background: `continuum/research/code-mode-vs-many-tools/findings.md`.
+
+### Out of scope (future batches)
+
+- M5 write tools (`lever_feedback(action="update")`) — blocked on Auth0 IT ticket for multi-tenant perform_as resolver
+- M6 webhook tools (`lever_list_webhooks`, `lever_register_webhook`, `lever_delete_webhook`) — same blocker
 
 ---
 
@@ -188,8 +214,8 @@ Planned for v3 M6 (3 webhook tools): `lever_list_webhooks`, `lever_register_webh
 ```
 src/
 ├── server.ts                 # Cloud Run entry, Express setup, MCP transport wiring
-├── tools.ts                  # registerAllTools — dispatch to additional + interview tools
-├── additional-tools.ts       # 16 tool registrations (split into src/tools/ in v3 M3a)
+├── tools.ts                  # registerAllTools + 4 tool registrations (search, candidates, postings)
+├── additional-tools.ts       # 11 tool registrations including 5 consolidated action-enum tools (split into src/tools/ in v3 M3a)
 ├── interview-tools.ts        # 2 interview-specific tool registrations
 ├── lever/
 │   └── client.ts             # LeverClient — REST wrapper, rate limit, pagination

@@ -92,7 +92,7 @@ Markdown, JSON, YAML, and config files are safe with `Edit`.
 src/
 ├── server.ts                 # Cloud Run entry, Express setup, MCP transport wiring
 ├── tools.ts                  # registerAllTools — dispatch to additional + interview tools
-├── additional-tools.ts       # 16+ tool registrations (split into src/tools/ in v3 M3a)
+├── additional-tools.ts       # 11 tool registrations including 5 consolidated action-enum tools (split into src/tools/ in v3 M3a)
 ├── interview-tools.ts        # 2 interview-specific tool registrations
 ├── lever/
 │   └── client.ts             # LeverClient — REST wrapper, rate limit, pagination
@@ -131,23 +131,45 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full diagram + auth-chain fai
 
 ---
 
-## Live tool inventory (18 tools, post-M1)
+## Live tool inventory (17 tools, post-consolidation)
 
-**Search & discovery (5):** `lever_advanced_search`, `lever_search_candidates`, `lever_search_archived_candidates`, `lever_find_postings_by_owner`, `lever_list_open_roles`
+**Same-resource clusters consolidated** into action-enum tools 2026-05-27 (commits `17951ea`...`71d999c`). Pattern: one tool per resource, `action` enum dispatches to the operation. Reduces schema-token overhead ~30-40% vs the prior 26-tool registry. See `continuum/research/code-mode-vs-many-tools/findings.md` for the analysis.
 
-**Candidate management (4):** `lever_get_candidate`, `lever_update_candidate`, `lever_add_note`, `lever_archive_candidate`
+**Search & discovery (4):** `lever_advanced_search`, `lever_search_candidates`, `lever_find_postings_by_owner`, `lever_list_open_roles`
 
-**Application / files (2):** `lever_list_applications`, `lever_list_files`
+**Candidate management (2):** `lever_get_candidate`, `lever_update_candidate`
+
+**Application / files / emails (3):** `lever_list_applications`, `lever_list_files`, `lever_list_emails`
 
 **Interview (2):** `lever_manage_interview`, `lever_get_interview_insights`
 
-**Requisitions (2):** `lever_list_requisitions`, `lever_get_requisition_details`
+**User lookup (1):** `lever_get_users`
 
-**Reference data (2):** `lever_get_stages`, `lever_get_archive_reasons`
+**Notes (1) — consolidated 3→1:** `lever_notes` with `action: list | get | add`
 
-**User lookup (1) — new in v3 M1:** `lever_get_users`
+**Feedback (1) — consolidated 4→1:** `lever_feedback` with `action: list_templates | list | get | submit`
 
-Tool registrations live in `src/additional-tools.ts` (16) and `src/interview-tools.ts` (2). The v3 M3a milestone splits these into domain-grouped files under `src/tools/`.
+**Archive (1) — consolidated 3→1:** `lever_archive` with `action: list_reasons | archive | search`
+
+**Stages (1) — consolidated 2→1:** `lever_stages` with `action: list | history`
+
+**Requisitions (1) — consolidated 2→1:** `lever_requisitions` with `action: list | get`
+
+Tool registrations live in `src/tools.ts` (4), `src/additional-tools.ts` (11), and `src/interview-tools.ts` (2). The v3 M3a milestone splits these into domain-grouped files under `src/tools/`.
+
+### Action-enum tool convention
+
+For consolidated tools above, the schema follows this shape:
+
+```typescript
+{
+  action: z.enum([...]).describe("Operation to perform. <per-action one-liner>"),
+  // shared params (e.g. opportunity_id) — optional at schema level, required at runtime per action
+  // action-specific params — optional, runtime-validated in the handler's switch case
+}
+```
+
+Handler dispatches with `switch (args.action)`. Each case calls the matching `LeverClient` method, throws an explicit `Error` for missing required params, and returns the same shape the pre-consolidation tool returned (response shapes preserved verbatim — they are downstream contract). The Zod enum gates invalid action strings before the handler runs; the default case in the switch is defense-in-depth.
 
 ---
 
