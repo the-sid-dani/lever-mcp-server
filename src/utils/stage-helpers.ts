@@ -67,7 +67,7 @@ export async function resolveSingleStageIdentifier(
     identifier: string
 ): Promise<string> {
     const results = await resolveStageIdentifier(client, identifier);
-    return results[0];
+    return results[0]!;
 }
 
 /**

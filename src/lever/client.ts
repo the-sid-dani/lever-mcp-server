@@ -6,6 +6,7 @@ import type {
 	LeverPanel,
 	LeverUser,
 } from "../types/lever.js";
+import { randomUUID } from "node:crypto";
 
 // Simple token bucket implementation for rate limiting
 class TokenBucket {
@@ -77,7 +78,9 @@ export class LeverClient {
 					if (value !== undefined && value !== null) {
 						// Handle arrays by appending multiple times
 						if (Array.isArray(value)) {
-							value.forEach(v => url.searchParams.append(key, String(v)));
+							value.forEach((v) => {
+								url.searchParams.append(key, String(v));
+							});
 						} else {
 							url.searchParams.append(key, String(value));
 						}
@@ -85,7 +88,7 @@ export class LeverClient {
 				});
 			}
 
-			const traceId = `api-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+			const traceId = randomUUID();
 			console.log(`[API-TRACE ${traceId}] START ${method} ${endpoint}`);
 			const startTime = Date.now();
 
@@ -183,7 +186,7 @@ export class LeverClient {
 		
 		// Debug logging
 		if (response && response.data && response.data.length > 0) {
-			console.log(`getOpportunities: Got ${response.data.length} candidates, first has name: ${response.data[0].name || 'NO_NAME'}`);
+			console.log(`getOpportunities: Got ${response.data.length} candidates, first has name: ${response.data[0]!.name || 'NO_NAME'}`);
 		}
 		
 		return response;

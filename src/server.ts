@@ -7,6 +7,7 @@
 
 import express, { Request, Response, NextFunction } from "express";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { registerAllTools } from "./tools.js";
@@ -17,6 +18,10 @@ import {
 	validateOAuthConfig,
 	isOAuthEnabled,
 } from "./auth/index.js";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
+const SERVER_VERSION = pkg.version as string;
 
 // Configuration
 const PORT = parseInt(process.env.PORT || "8080", 10);
@@ -74,7 +79,7 @@ app.get("/health", (_req: Request, res: Response) => {
 	res.status(200).json({
 		status: "healthy",
 		service: "lever-mcp-server",
-		version: "2.0.0",
+		version: SERVER_VERSION,
 		activeSessions: transports.size,
 		oauthEnabled: isOAuthEnabled(),
 	});
@@ -97,7 +102,7 @@ app.head("/", (_req: Request, res: Response) => {
 app.get("/", (_req: Request, res: Response) => {
 	res.status(200).json({
 		service: "Lever MCP Server",
-		version: "2.0.0",
+		version: SERVER_VERSION,
 		endpoints: {
 			health: "/health",
 			mcp: "/mcp",
@@ -111,7 +116,7 @@ app.get("/", (_req: Request, res: Response) => {
 function createMcpServer(): McpServer {
 	const server = new McpServer({
 		name: "Lever ATS",
-		version: "2.0.0",
+		version: SERVER_VERSION,
 	});
 
 	// Register all Lever tools
@@ -215,7 +220,7 @@ app.listen(PORT, () => {
 	const authMode = isOAuthEnabled() ? "OAuth 2.1 (Auth0)" : "Cloud Run IAM";
 	console.log(`
 ╔════════════════════════════════════════════════════════════╗
-║             LEVER MCP SERVER v2.0.0                        ║
+║             ${`LEVER MCP SERVER v${SERVER_VERSION}`.padEnd(47)}║
 ╠════════════════════════════════════════════════════════════╣
 ║  Status:    Running                                        ║
 ║  Port:      ${PORT.toString().padEnd(45)}║

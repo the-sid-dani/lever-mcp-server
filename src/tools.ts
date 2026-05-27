@@ -5,6 +5,7 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { LeverClient } from "./lever/client.js";
 import type { LeverOpportunity, LeverPosting } from "./types/lever.js";
@@ -74,7 +75,7 @@ function formatPosting(posting: LeverPosting): Record<string, unknown> {
 
 // Tracing wrapper for tool execution
 function trace(toolName: string, message: string, data?: unknown) {
-	const traceId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+	const traceId = randomUUID();
 	console.log(`[TOOL ${traceId}] ${toolName}: ${message}`, data ? JSON.stringify(data).substring(0, 200) : "");
 }
 
@@ -171,7 +172,7 @@ function registerSearchTools(server: McpServer, client: LeverClient): void {
 					};
 
 					if (emailSearch) searchParams.email = params.email;
-					if (stageIds.length > 0) searchParams.stage_id = stageIds[0];
+					if (stageIds.length > 0) searchParams.stage_id = stageIds[0]!;
 					else if (params.stage) searchParams.stage_id = params.stage;
 					if (params.posting_id) searchParams.posting_id = params.posting_id;
 					if (params.tags) searchParams.tag = params.tags.split(",")[0];
