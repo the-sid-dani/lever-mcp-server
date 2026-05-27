@@ -261,7 +261,7 @@ function registerCandidateTools(server: McpServer, client: LeverClient): void {
 		}
 	);
 
-	// lever_archive_candidate is in additional-tools.ts with enhanced parameters
+	// lever_archive (consolidated: list_reasons + archive + search) is in additional-tools.ts
 }
 
 /**
@@ -315,23 +315,6 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 				content: [{
 					type: "text",
 					text: JSON.stringify(stages, null, 2),
-				}],
-			};
-		}
-	);
-
-	server.tool(
-		"lever_get_archive_reasons",
-		"Get all archive reasons",
-		{},
-		async (): Promise<McpToolResponse> => {
-			trace("lever_get_archive_reasons", "START");
-
-			const reasons = await client.getArchiveReasons();
-			return {
-				content: [{
-					type: "text",
-					text: JSON.stringify(reasons, null, 2),
 				}],
 			};
 		}
