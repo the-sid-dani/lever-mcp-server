@@ -18,6 +18,23 @@ interface McpToolResponse {
 	content: Array<{ type: "text"; text: string }>;
 }
 
+let sharedClient: LeverClient | null = null;
+let sharedClientApiKey: string | null = null;
+
+function getSharedClient(apiKey: string): LeverClient {
+	if (!sharedClient) {
+		sharedClient = new LeverClient(apiKey);
+		sharedClientApiKey = apiKey;
+		return sharedClient;
+	}
+
+	if (sharedClientApiKey !== apiKey) {
+		console.warn("LeverClient singleton already initialized with a different API key; reusing existing client");
+	}
+
+	return sharedClient;
+}
+
 // Helper to format posting data
 function formatPosting(posting: LeverPosting): Record<string, unknown> {
 	const location = posting.categories?.location || "Unknown";
@@ -65,7 +82,7 @@ function trace(toolName: string, message: string, data?: unknown) {
  * Register all Lever tools on the given MCP server
  */
 export function registerAllTools(server: McpServer, apiKey: string): void {
-	const client = new LeverClient(apiKey);
+	const client = getSharedClient(apiKey);
 
 	console.log("Registering Lever tools...");
 
