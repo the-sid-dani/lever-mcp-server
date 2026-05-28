@@ -95,10 +95,10 @@ src/
 ├── lever/
 │   └── client.ts             # LeverClient — REST wrapper, rate limit, pagination
 ├── auth/
-│   ├── middleware.ts         # JWT validation, OAUTH_ENABLED toggle, Cloud Run IAM fallback
-│   ├── metadata.ts           # OAuth 2.0 Protected Resource Metadata endpoint
-│   ├── constants.ts
-│   ├── types.ts
+│   ├── google-oauth-broker.ts # OAuthServerProvider — self-hosted AS, federates to Google (M0b)
+│   ├── google-verifier.ts     # Google ID-token validation (RS256, iss, aud, hd==samba.tv)
+│   ├── metadata.ts            # OAuth 2.0 Protected Resource Metadata endpoint
+│   ├── constants.ts           # GOOGLE_OAUTH_* config + isOAuthEnabled()
 │   └── index.ts
 ├── types/lever.ts            # Lever API response type definitions
 └── utils/stage-helpers.ts
@@ -213,7 +213,7 @@ npm test         # vitest run (full suite, exits on first failure)
 npm run test:watch
 ```
 
-Current tests: `src/auth/__tests__/middleware.test.ts` (14 tests). Tool-level tests land in v3 M4 — fixtures already captured in `test-fixtures/lever-api/`.
+Current tests: `src/auth/__tests__/google-verifier.test.ts` + `google-oauth-broker.test.ts` (31 tests — the Google OAuth broker + verifier; the old Auth0 middleware tests were removed in M0b). Tool-level tests land in v3 M4 — fixtures already captured in `test-fixtures/lever-api/`.
 
 ### End-to-end tool smoke harness
 
