@@ -30,8 +30,6 @@ A remote MCP (Model Context Protocol) server that exposes the Lever ATS API as t
 | Deploy target | GCP Cloud Run, region us-central1 |
 | Build | Dockerfile + Cloud Build (`cloudbuild.yaml`) |
 
-**NOT** Cloudflare Workers / Durable Objects / wrangler / SSE. The 2026-02-03 commit (`38e4768`) migrated to Express on Cloud Run. The previous architecture is gone.
-
 ---
 
 ## Development commands
@@ -198,7 +196,7 @@ See [system-design.md §6](./system-design.md#lever-api-integration) for the ful
 
 1. **Identify the right home:** which existing tool file groups by domain match? (After v3 M3a: `src/tools/{search,candidates,applications,interviews,requisitions,reference,feedback,webhooks}.ts`.)
 2. **Add the client method first** in `src/lever/client.ts` (or a future `src/lever/client-write.ts` for writes). Implement pagination + rate-limit-aware retry.
-3. **Register the tool** with `server.tool(name, zodSchema, async (args) => {...})`. Use the pattern in `additional-tools.ts` (NOT the `this.server.tool` pattern — that was the dead Cloudflare Workers McpAgent code, deleted in v3 M1).
+3. **Register the tool** with `server.tool(name, zodSchema, async (args) => {...})`. Use the pattern in `additional-tools.ts`.
 4. **For writes:** route through the write helper that attaches `perform_as`. Do NOT call `this.client.makeRequest("POST", ...)` directly.
 5. **Add fixtures:** capture a real probe response (PII-scrubbed) into `test-fixtures/lever-api/responses/` OR write a synthetic fixture matching the documented Lever shape.
 6. **Add a vitest test** in `src/__tests__/` mocking `LeverClient`. Cover happy path + 2-3 error paths.
@@ -299,4 +297,4 @@ The 14-milestone v3 refactor is tracked at [ATF-476](https://sambatv.atlassian.n
 2. Read [`ARCHITECTURE.md`](./ARCHITECTURE.md) — request flow + failure recovery.
 3. Check the [Confluence hub](https://sambatv.atlassian.net/wiki/spaces/ATF/pages/14838136852) for stakeholder context.
 4. Check the relevant Jira Story under [ATF-476](https://sambatv.atlassian.net/browse/ATF-476) for scope + acceptance criteria.
-5. If you find `wrangler`, `Durable Objects`, or `McpAgent` references in code, that's pre-migration debris worth removing. The `/sse` endpoint at `src/server.ts:205` is a deliberate 410-Gone deprecation marker, not debris (remove ~Aug 2026).
+5. The `/sse` endpoint in `src/server.ts` is a deliberate 410-Gone deprecation marker for the superseded MCP SSE transport (clients should use `/mcp` Streamable HTTP), not debris (remove ~Aug 2026).

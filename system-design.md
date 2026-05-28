@@ -22,7 +22,7 @@ The Lever MCP Server is a remote Model Context Protocol (MCP) server that expose
 
 ## 2. Current state (post-v1, pre-v3)
 
-v1 shipped 2026-02-03 (commit `38e4768 feat(auth): Add OAuth 2.1 with Auth0 for Claude.ai Connector support`). Originally built on Cloudflare Workers + Durable Objects + SSE; migrated to Express + Cloud Run + Streamable HTTP in the same OAuth commit. **In-repo docs (README.md, CLAUDE.md) still describe the Cloudflare Workers architecture and are stale.** This is being corrected as part of v3 (ATF-476 M2).
+v1 shipped 2026-02-03 (commit `38e4768 feat(auth): Add OAuth 2.1 with Auth0 for Claude.ai Connector support`). Built on Express + Cloud Run + Streamable HTTP transport, with OAuth 2.1 via Auth0 added in the same commit. Documentation (README.md, CLAUDE.md) was reconciled with this architecture in v3 (ATF-476 M2).
 
 ### v1 stack
 
@@ -40,7 +40,7 @@ v1 shipped 2026-02-03 (commit `38e4768 feat(auth): Add OAuth 2.1 with Auth0 for 
 | Auth (env-toggle) | OAuth 2.1 + Auth0; falls back to Cloud Run IAM when `OAUTH_ENABLED=false` |
 | Live tool count | 17 (see §8) |
 | LOC (live code) | ~4,325 across 7 source files |
-| LOC (dead code) | None — 1,322 LOC of Cloudflare Workers `src/index.ts` removed in v3 M1 (commit `0c369eb` on `refactor/v3`) |
+| LOC (dead code) | None — 1,322 LOC of unused `src/index.ts` removed in v3 M1 (commit `0c369eb`) |
 
 ### v1 acceptance state
 
@@ -90,7 +90,7 @@ v1 shipped 2026-02-03 (commit `38e4768 feat(auth): Add OAuth 2.1 with Auth0 for 
 ```
 src/
 ├── server.ts                 # Cloud Run entry, Express setup, MCP transport wiring (237 LOC)
-│                              # (index.ts deleted in v3 M1 — was 1,322 LOC of dead Cloudflare Workers McpAgent code)
+│                              # (index.ts deleted in v3 M1 — was 1,322 LOC of unused, never-imported code)
 ├── tools.ts                  # registerAllTools — registers 7 tools inline + dispatches to others (425 LOC)
 ├── additional-tools.ts       # 8 more tool registrations + formatter helpers (997 LOC, split in v3 M3a)
 ├── interview-tools.ts        # 2 interview-specific tool registrations (480 LOC)
@@ -203,7 +203,7 @@ The last two toggles (Resource Parameter Compatibility Profile and `iss` paramet
 ### Auth alternatives evaluated and rejected
 
 - **Raw Google OAuth without Auth0** — Google's OAuth doesn't support RFC 8707 resource indicators or Dynamic Client Registration, both required by MCP spec for Claude's connector flow. Domain restriction via `hd` is supported but doesn't fill the other gaps.
-- **Cloudflare Access for SaaS** — supports RFC 8707 and federates with Google, but lacks Dynamic Client Registration (no `/register` endpoint, pre-registration only). Viable only if the MCP client roster stabilizes to a known finite set. Re-evaluate later.
+- **Identity-aware access proxies (pre-registration only)** — gateways that front the service with SSO can satisfy RFC 8707 and federate with Google, but those lacking Dynamic Client Registration (no `/register` endpoint) only work if the MCP client roster stabilizes to a known finite set. Rejected for the same DCR gap.
 - **Self-hosted OAuth 2.1 server** — federates to Google as the IdP, server issues its own audience-bound tokens. ~1-2 days of code; loses to Auth0 on operational complexity (you own OAuth security forever).
 
 ## 5. MCP protocol compliance
@@ -343,7 +343,6 @@ Full vertical-slice breakdown lives in ATF-476's Stories. Summary:
 - **MCP session persistence across Cloud Run revision swaps.** Current `transports` map is per-container memory. Move to Redis/Firestore only if multi-user use grows real.
 - **Repo migration from personal `the-sid-dani/lever-mcp-server` → Samba org.** Tracked as a separate housekeeping project, doesn't block v3.
 - **Observability beyond M5's structured logging baseline.** Cloud Monitoring dashboard, error-rate SLO alerting, p95 latency tracking against thresholds — separate future project once write-tool usage stabilizes.
-- **Cloudflare Access for SaaS migration.** Evaluated, ruled out for v3 (DCR gap). Revisit if Auth0 contract becomes painful.
 
 ## 12. Operational runbook
 
@@ -392,9 +391,8 @@ Atomic rolling deploy. Active MCP sessions reconnect transparently. Mid-flight t
 
 | Date | Decision | Rationale |
 |---|---|---|
-| 2026-02-03 | Migrate from Cloudflare Workers to Express on Cloud Run | OAuth 2.1 + Auth0 integration easier on Node; Workers' SSE pattern misaligned with MCP's Streamable HTTP |
 | 2026-05-22 | Refactor v3 scoped (ATF-476), not rebuild | SDK + OAuth wiring + 16 working tools are non-trivial; tech debt is mechanical, not architectural |
-| 2026-05-26 | Keep Auth0 as the OAuth 2.1 AS for v3 | MCP spec requires audience binding (RFC 8707) + Dynamic Client Registration; Google OAuth lacks both; CF Access lacks DCR |
+| 2026-05-26 | Keep Auth0 as the OAuth 2.1 AS for v3 | MCP spec requires audience binding (RFC 8707) + Dynamic Client Registration; Google OAuth lacks both |
 | 2026-05-26 | Multi-tenant `perform_as` via authenticated email → Lever user lookup | Single-user default attribution is a compliance bug; resolve identity from token claims |
 | 2026-05-26 | `LEVER_DEFAULT_USER_ID` is server-side fallback ONLY (not for authenticated paths) | Otherwise unmatched authenticated users get writes attributed to default — attribution + audit failure |
 | 2026-05-26 | Webhook ingestion sink stays out of scope; only registration tools ship in v3 | Sink requires a real consumer use case; registration is a 3-tool half-day add usable with any existing inbound URL |
