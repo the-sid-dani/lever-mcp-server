@@ -7,6 +7,7 @@
 
 import express, { Request, Response, NextFunction } from "express";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { registerAllTools } from "./tools.js";
@@ -17,6 +18,10 @@ import {
 	validateOAuthConfig,
 	isOAuthEnabled,
 } from "./auth/index.js";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
+const SERVER_VERSION = pkg.version as string;
 
 // Configuration
 const PORT = parseInt(process.env.PORT || "8080", 10);
@@ -74,9 +79,41 @@ app.get("/health", (_req: Request, res: Response) => {
 	res.status(200).json({
 		status: "healthy",
 		service: "lever-mcp-server",
-		version: "2.0.0",
+		version: SERVER_VERSION,
 		activeSessions: transports.size,
 		oauthEnabled: isOAuthEnabled(),
+	});
+});
+
+// Readiness check endpoint for dependency availability
+app.get("/readyz", async (_req: Request, res: Response) => {
+	const checks = {
+		leverApiKey: process.env.LEVER_API_KEY ? "ok" : "missing",
+		jwks: "skipped",
+	};
+
+	if (isOAuthEnabled()) {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 2_000);
+
+		try {
+			const response = await fetch(`${OAUTH_CONFIG.auth0Issuer}/.well-known/jwks.json`, {
+				method: "HEAD",
+				signal: controller.signal,
+			});
+
+			checks.jwks = response.ok ? "ok" : "degraded";
+		} catch {
+			checks.jwks = "degraded";
+		} finally {
+			clearTimeout(timeout);
+		}
+	}
+
+	const ready = checks.leverApiKey === "ok" && checks.jwks !== "degraded";
+	res.status(ready ? 200 : 503).json({
+		status: ready ? "ready" : "not_ready",
+		checks,
 	});
 });
 
@@ -97,7 +134,7 @@ app.head("/", (_req: Request, res: Response) => {
 app.get("/", (_req: Request, res: Response) => {
 	res.status(200).json({
 		service: "Lever MCP Server",
-		version: "2.0.0",
+		version: SERVER_VERSION,
 		endpoints: {
 			health: "/health",
 			mcp: "/mcp",
@@ -111,7 +148,7 @@ app.get("/", (_req: Request, res: Response) => {
 function createMcpServer(): McpServer {
 	const server = new McpServer({
 		name: "Lever ATS",
-		version: "2.0.0",
+		version: SERVER_VERSION,
 	});
 
 	// Register all Lever tools
@@ -147,12 +184,19 @@ app.all("/mcp", async (req: Request, res: Response) => {
 	// Check for existing session
 	const sessionId = req.headers["mcp-session-id"] as string | undefined;
 	let transport: StreamableHTTPServerTransport;
+	let isNewSession = false;
 
 	if (sessionId && transports.has(sessionId)) {
 		// Reuse existing transport
 		transport = transports.get(sessionId)!;
 	} else if (!sessionId && req.method === "POST") {
-		// New session - create transport and server
+		// New session - create transport and server.
+		// NOTE: In MCP SDK 1.29+, transport.sessionId is a lazy getter and
+		// returns undefined until handleRequest() has run. So we cannot capture
+		// the session ID immediately after construction — we capture it AFTER
+		// handleRequest() resolves, in the try block below. (Pre-1.29 behavior
+		// was synchronous; this is a v3-refactor regression fix.)
+		isNewSession = true;
 		transport = new StreamableHTTPServerTransport({
 			sessionIdGenerator: () => randomUUID(),
 		});
@@ -160,20 +204,6 @@ app.all("/mcp", async (req: Request, res: Response) => {
 		// Create and connect MCP server
 		const server = createMcpServer();
 		await server.connect(transport);
-
-		// Store transport for session reuse
-		const newSessionId = transport.sessionId;
-		if (newSessionId) {
-			transports.set(newSessionId, transport);
-
-			// Clean up on close
-			transport.onclose = () => {
-				transports.delete(newSessionId);
-				console.log(`[MCP] Session closed: ${newSessionId}`);
-			};
-
-			console.log(`[MCP] New session: ${newSessionId}`);
-		}
 	} else {
 		// Invalid request
 		res.status(400).json({ error: "Invalid session or request" });
@@ -183,6 +213,23 @@ app.all("/mcp", async (req: Request, res: Response) => {
 	// Handle the request
 	try {
 		await transport.handleRequest(req, res, req.body);
+
+		// AFTER handleRequest, transport.sessionId is populated (lazy getter
+		// resolves during handling). Capture + store for session reuse.
+		if (isNewSession) {
+			const newSessionId = transport.sessionId;
+			if (newSessionId && !transports.has(newSessionId)) {
+				transports.set(newSessionId, transport);
+
+				// Clean up on close
+				transport.onclose = () => {
+					transports.delete(newSessionId);
+					console.log(`[MCP] Session closed: ${newSessionId}`);
+				};
+
+				console.log(`[MCP] New session: ${newSessionId}`);
+			}
+		}
 	} catch (error) {
 		console.error("[MCP] Error handling request:", error);
 		if (!res.headersSent) {
@@ -202,21 +249,17 @@ app.get("/sse", (_req: Request, res: Response) => {
 
 // Start server
 app.listen(PORT, () => {
-	const authMode = isOAuthEnabled() ? "OAuth 2.1 (Auth0)" : "Cloud Run IAM";
-	console.log(`
-╔════════════════════════════════════════════════════════════╗
-║             LEVER MCP SERVER v2.0.0                        ║
-╠════════════════════════════════════════════════════════════╣
-║  Status:    Running                                        ║
-║  Port:      ${PORT.toString().padEnd(45)}║
-║  Auth:      ${authMode.padEnd(44)}║
-╠════════════════════════════════════════════════════════════╣
-║  Endpoints:                                                ║
-║    GET  /health                  - Health check            ║
-║    GET  /.well-known/oauth-...   - OAuth metadata          ║
-║    ALL  /mcp                     - MCP Streamable HTTP     ║
-╚════════════════════════════════════════════════════════════╝
-	`);
+	console.log(
+		JSON.stringify({
+			event: "server_started",
+			service: "lever-mcp-server",
+			version: SERVER_VERSION,
+			port: PORT,
+			authMode: isOAuthEnabled() ? "OAuth 2.1 (Auth0)" : "Cloud Run IAM",
+			endpoints: ["/health", "/.well-known/oauth-protected-resource", "/mcp"],
+			mcpProtocolVersion: MCP_PROTOCOL_VERSION,
+		}),
+	);
 });
 
 // Graceful shutdown

@@ -4,7 +4,9 @@ import type {
 	LeverPosting,
 	LeverInterview,
 	LeverPanel,
+	LeverUser,
 } from "../types/lever.js";
+import { randomUUID } from "node:crypto";
 
 // Simple token bucket implementation for rate limiting
 class TokenBucket {
@@ -76,7 +78,9 @@ export class LeverClient {
 					if (value !== undefined && value !== null) {
 						// Handle arrays by appending multiple times
 						if (Array.isArray(value)) {
-							value.forEach(v => url.searchParams.append(key, String(v)));
+							value.forEach((v) => {
+								url.searchParams.append(key, String(v));
+							});
 						} else {
 							url.searchParams.append(key, String(value));
 						}
@@ -84,7 +88,7 @@ export class LeverClient {
 				});
 			}
 
-			const traceId = `api-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+			const traceId = randomUUID();
 			console.log(`[API-TRACE ${traceId}] START ${method} ${endpoint}`);
 			const startTime = Date.now();
 
@@ -168,16 +172,21 @@ export class LeverClient {
 		origin?: string;
 		limit?: number;
 		offset?: string;
+		expand?: string[];
 	}): Promise<LeverApiResponse<LeverOpportunity>> {
+		// Default expand to include owner so recruiter data is always available
+		const expand = params.expand || ["owner"];
+		const { expand: _ignored, ...restParams } = params;
+
 		const response = await this.makeRequest<LeverApiResponse<LeverOpportunity>>(
 			"GET",
 			"/opportunities",
-			params,
+			{ ...restParams, expand },
 		);
 		
 		// Debug logging
 		if (response && response.data && response.data.length > 0) {
-			console.log(`getOpportunities: Got ${response.data.length} candidates, first has name: ${response.data[0].name || 'NO_NAME'}`);
+			console.log(`getOpportunities: Got ${response.data.length} candidates, first has name: ${response.data[0]!.name || 'NO_NAME'}`);
 		}
 		
 		return response;
@@ -186,9 +195,11 @@ export class LeverClient {
 	async getOpportunity(id: string): Promise<{ data: LeverOpportunity }> {
 		try {
 			// The API returns { data: opportunity } structure, so we expect that format
+			// Expand owner to get recruiter name instead of just a UUID
 			const response = await this.makeRequest<{ data: LeverOpportunity }>(
 			"GET",
 			`/opportunities/${id}`,
+			{ expand: ["owner"] },
 		);
 			
 			// Check if the API returned null or undefined
@@ -713,17 +724,172 @@ export class LeverClient {
 		await this.makeRequest('DELETE', `opportunities/${opportunityId}/panels/${panelId}`, params);
 	}
 
-	// Note: The following methods are placeholders for functionality that may not be 
-	// directly supported by the Lever API or require additional research:
-	
-	// async getUsers(): Promise<any> {
-	//   // TODO: Implement if/when Lever API provides a users endpoint
-	//   throw new Error("getUsers is not yet implemented - Lever API documentation needed");
-	// }
-	
-	// async updateOpportunityOwner(opportunityId: string, ownerId: string): Promise<any> {
-	//   // TODO: Implement if/when Lever API provides an owner update endpoint
-	//   // The API doesn't seem to have a direct endpoint for updating the owner field
-	//   throw new Error("updateOpportunityOwner is not yet implemented - Lever API may not support this directly");
-	// }
+	async getUsers(params?: {
+		limit?: number;
+		offset?: string;
+		includeDeactivated?: boolean;
+	}): Promise<LeverApiResponse<LeverUser>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		if (params?.includeDeactivated) {
+			queryParams.includeDeactivated = true;
+		}
+		return this.makeRequest<LeverApiResponse<LeverUser>>("GET", "/users", queryParams);
+	}
+
+	async getUser(userId: string): Promise<{ data: LeverUser }> {
+		return this.makeRequest<{ data: LeverUser }>("GET", `/users/${userId}`);
+	}
+
+	// Read-only methods for notes, feedback, emails — M1.7 (VAL-013)
+	// Uses `any` for response item types; M3a tightens with proper Lever shapes.
+
+	async getNotes(
+		opportunityId: string,
+		params?: { limit?: number; offset?: string },
+	): Promise<LeverApiResponse<any>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		return this.makeRequest<LeverApiResponse<any>>(
+			"GET",
+			`/opportunities/${opportunityId}/notes`,
+			queryParams,
+		);
+	}
+
+	async getNote(
+		opportunityId: string,
+		noteId: string,
+	): Promise<{ data: any }> {
+		return this.makeRequest<{ data: any }>(
+			"GET",
+			`/opportunities/${opportunityId}/notes/${noteId}`,
+		);
+	}
+
+	async getOpportunityFeedback(
+		opportunityId: string,
+		params?: { limit?: number; offset?: string },
+	): Promise<LeverApiResponse<any>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		return this.makeRequest<LeverApiResponse<any>>(
+			"GET",
+			`/opportunities/${opportunityId}/feedback`,
+			queryParams,
+		);
+	}
+
+	async getFeedback(
+		opportunityId: string,
+		feedbackId: string,
+	): Promise<{ data: any }> {
+		return this.makeRequest<{ data: any }>(
+			"GET",
+			`/opportunities/${opportunityId}/feedback/${feedbackId}`,
+		);
+	}
+
+	async getFeedbackTemplates(params?: {
+		limit?: number;
+		offset?: string;
+	}): Promise<LeverApiResponse<any>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		return this.makeRequest<LeverApiResponse<any>>(
+			"GET",
+			"/feedback_templates",
+			queryParams,
+		);
+	}
+
+	async getEmails(
+		opportunityId: string,
+		params?: { limit?: number; offset?: string },
+	): Promise<LeverApiResponse<any>> {
+		const queryParams: any = {
+			limit: Math.min(params?.limit || 100, 100),
+		};
+		if (params?.offset) {
+			queryParams.offset = params.offset;
+		}
+		return this.makeRequest<LeverApiResponse<any>>(
+			"GET",
+			`/opportunities/${opportunityId}/emails`,
+			queryParams,
+		);
+	}
+
+	async submitFeedback(
+		opportunityId: string,
+		baseTemplateId: string,
+		fieldValues: Array<{ id: string; value: any }>,
+		options?: {
+			interview?: string;
+			panel?: string;
+			performAs?: string;
+			/**
+			 * When true (default), sets completedAt to Date.now() in the POST body
+			 * so Lever marks the feedback form as submitted/complete. When false,
+			 * omits completedAt → feedback record is created as a DRAFT visible in
+			 * the Lever UI but not yet finalized.
+			 *
+			 * Empirical finding 2026-05-28: omitting completedAt creates a draft,
+			 * NOT a submitted form (despite Lever docs saying "Defaults to now").
+			 * Manish Katheeth feedback (e098e104) was stuck as draft for ~11h
+			 * until manually completed in the UI. Fixed by sending completedAt.
+			 */
+			markComplete?: boolean;
+			/**
+			 * Explicit completion timestamp (ms). If set, overrides markComplete.
+			 * Used for backdating feedback to match the actual interview time.
+			 */
+			completedAt?: number;
+		},
+	): Promise<any> {
+		const data: any = {
+			baseTemplateId,
+			fieldValues,
+		};
+		if (options?.interview) data.interview = options.interview;
+		if (options?.panel) data.panel = options.panel;
+
+		// completedAt semantics:
+		//   explicit number → use as-is (backdating)
+		//   markComplete !== false → Date.now() (default: submit-as-complete)
+		//   markComplete === false → omit → draft mode
+		if (typeof options?.completedAt === "number") {
+			data.completedAt = options.completedAt;
+		} else if (options?.markComplete !== false) {
+			data.completedAt = Date.now();
+		}
+
+		const params: any = {};
+		if (options?.performAs) {
+			params.perform_as = options.performAs;
+		}
+
+		return this.makeRequest(
+			"POST",
+			`/opportunities/${opportunityId}/feedback`,
+			Object.keys(params).length > 0 ? params : undefined,
+			data,
+		);
+	}
 }

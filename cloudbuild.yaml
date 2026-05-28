@@ -7,6 +7,7 @@
 #   1. Create secrets in GCP Secret Manager:
 #      - auth0-issuer-url: Your Auth0 tenant URL (e.g., https://your-tenant.auth0.com)
 #      - auth0-audience: Your Auth0 API identifier (e.g., https://lever-mcp-xxx.run.app)
+#      - lever-default-user-id: Default Lever user ID for perform_as write fallback
 #   2. Grant Cloud Build service account access to the secrets
 
 substitutions:
@@ -57,7 +58,7 @@ steps:
       - '--timeout'
       - '300s'
       - '--set-secrets'
-      - 'LEVER_API_KEY=lever-api-key:latest,AUTH0_ISSUER_URL=auth0-issuer-url:latest,AUTH0_AUDIENCE=auth0-audience:latest'
+      - 'LEVER_API_KEY=lever-api-key:latest,AUTH0_ISSUER_URL=auth0-issuer-url:latest,AUTH0_AUDIENCE=auth0-audience:latest,LEVER_DEFAULT_USER_ID=lever-default-user-id:latest'
       - '--set-env-vars'
       - 'NODE_ENV=production'
 

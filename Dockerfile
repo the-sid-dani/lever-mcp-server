@@ -30,6 +30,10 @@ RUN npm ci --omit=dev
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
 
+RUN groupadd -r app && useradd -r -g app -u 10001 -m -s /sbin/nologin app
+RUN chown -R app:app /app
+USER app
+
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=8080

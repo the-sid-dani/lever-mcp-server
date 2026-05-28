@@ -1,0 +1,9 @@
+* @the-sid-dani
+
+/src/auth/** @the-sid-dani
+/cloudbuild.yaml @the-sid-dani
+/Dockerfile @the-sid-dani
+/.github/workflows/** @the-sid-dani
+/SECURITY.md @the-sid-dani
+/CLAUDE.md @the-sid-dani
+/system-design.md @the-sid-dani

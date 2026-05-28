@@ -5,6 +5,7 @@
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { LeverClient } from "./lever/client.js";
 import type { LeverOpportunity, LeverPosting } from "./types/lever.js";
@@ -16,6 +17,23 @@ import { resolveStageIdentifier } from "./utils/stage-helpers.js";
 interface McpToolResponse {
 	[key: string]: unknown;
 	content: Array<{ type: "text"; text: string }>;
+}
+
+let sharedClient: LeverClient | null = null;
+let sharedClientApiKey: string | null = null;
+
+function getSharedClient(apiKey: string): LeverClient {
+	if (!sharedClient) {
+		sharedClient = new LeverClient(apiKey);
+		sharedClientApiKey = apiKey;
+		return sharedClient;
+	}
+
+	if (sharedClientApiKey !== apiKey) {
+		console.warn("LeverClient singleton already initialized with a different API key; reusing existing client");
+	}
+
+	return sharedClient;
 }
 
 // Helper to format posting data
@@ -57,7 +75,7 @@ function formatPosting(posting: LeverPosting): Record<string, unknown> {
 
 // Tracing wrapper for tool execution
 function trace(toolName: string, message: string, data?: unknown) {
-	const traceId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+	const traceId = randomUUID();
 	console.log(`[TOOL ${traceId}] ${toolName}: ${message}`, data ? JSON.stringify(data).substring(0, 200) : "");
 }
 
@@ -65,7 +83,7 @@ function trace(toolName: string, message: string, data?: unknown) {
  * Register all Lever tools on the given MCP server
  */
 export function registerAllTools(server: McpServer, apiKey: string): void {
-	const client = new LeverClient(apiKey);
+	const client = getSharedClient(apiKey);
 
 	console.log("Registering Lever tools...");
 
@@ -154,7 +172,7 @@ function registerSearchTools(server: McpServer, client: LeverClient): void {
 					};
 
 					if (emailSearch) searchParams.email = params.email;
-					if (stageIds.length > 0) searchParams.stage_id = stageIds[0];
+					if (stageIds.length > 0) searchParams.stage_id = stageIds[0]!;
 					else if (params.stage) searchParams.stage_id = params.stage;
 					if (params.posting_id) searchParams.posting_id = params.posting_id;
 					if (params.tags) searchParams.tag = params.tags.split(",")[0];
@@ -261,38 +279,7 @@ function registerCandidateTools(server: McpServer, client: LeverClient): void {
 		}
 	);
 
-	server.tool(
-		"lever_add_note",
-		"Add a note to a candidate's profile",
-		{
-			opportunity_id: z.string().describe("The opportunity/candidate ID"),
-			note: z.string().describe("The note content"),
-			author_email: z.string().optional().describe("Email of the note author"),
-		},
-		async (params): Promise<McpToolResponse> => {
-			trace("lever_add_note", "START", params);
-
-			try {
-				const result = await client.addNote(params.opportunity_id, params.note, params.author_email);
-
-				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({ success: true, message: "Note added successfully", data: result }, null, 2),
-					}],
-				};
-			} catch (error) {
-				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-					}],
-				};
-			}
-		}
-	);
-
-	// lever_archive_candidate is in additional-tools.ts with enhanced parameters
+	// lever_archive (consolidated: list_reasons + archive + search) is in additional-tools.ts
 }
 
 /**
@@ -331,40 +318,6 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 					}],
 				};
 			}
-		}
-	);
-
-	server.tool(
-		"lever_get_stages",
-		"Get all pipeline stages",
-		{},
-		async (): Promise<McpToolResponse> => {
-			trace("lever_get_stages", "START");
-
-			const stages = await client.getStages();
-			return {
-				content: [{
-					type: "text",
-					text: JSON.stringify(stages, null, 2),
-				}],
-			};
-		}
-	);
-
-	server.tool(
-		"lever_get_archive_reasons",
-		"Get all archive reasons",
-		{},
-		async (): Promise<McpToolResponse> => {
-			trace("lever_get_archive_reasons", "START");
-
-			const reasons = await client.getArchiveReasons();
-			return {
-				content: [{
-					type: "text",
-					text: JSON.stringify(reasons, null, 2),
-				}],
-			};
 		}
 	);
 

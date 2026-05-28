@@ -1,0 +1,62 @@
+{
+  "data": [
+    {
+      "id": "opp-test-001",
+      "name": "Test Candidate One",
+      "contact": "contact-test-001",
+      "headline": "Senior Engineer at ExampleCo",
+      "stage": "stage-test-phone-screen",
+      "stageChanges": [
+        {"toStageId": "stage-test-applied", "updatedAt": 1738531200000, "userId": "user-test-recruiter-001"}
+      ],
+      "owner": {
+        "id": "user-test-recruiter-001",
+        "name": "Test Recruiter One",
+        "email": "recruiter1@samba.tv"
+      },
+      "tags": ["referral", "senior"],
+      "sources": ["LinkedIn"],
+      "origin": "agency",
+      "sourcedBy": "user-test-recruiter-001",
+      "createdAt": 1738531200000,
+      "lastInteractionAt": 1740000000000,
+      "lastAdvancedAt": 1739000000000,
+      "snoozedUntil": null,
+      "archived": null,
+      "applications": ["app-test-001"],
+      "links": ["https://linkedin.com/in/testcandidate1"],
+      "emails": ["test1@example.com"],
+      "phones": [{"type": "mobile", "value": "+1-555-0100"}]
+    },
+    {
+      "id": "opp-test-002",
+      "name": "Test Candidate Two",
+      "contact": "contact-test-002",
+      "headline": "Staff Engineer at AnotherCo",
+      "stage": "stage-test-onsite",
+      "stageChanges": [
+        {"toStageId": "stage-test-applied", "updatedAt": 1738444800000, "userId": "user-test-recruiter-002"}
+      ],
+      "owner": {
+        "id": "user-test-recruiter-002",
+        "name": "Test Recruiter Two",
+        "email": "recruiter2@samba.tv"
+      },
+      "tags": [],
+      "sources": ["referral"],
+      "origin": "referred",
+      "sourcedBy": "user-test-employee-001",
+      "createdAt": 1738444800000,
+      "lastInteractionAt": 1740200000000,
+      "lastAdvancedAt": 1739800000000,
+      "snoozedUntil": null,
+      "archived": null,
+      "applications": ["app-test-002"],
+      "links": [],
+      "emails": ["test2@example.com"],
+      "phones": []
+    }
+  ],
+  "hasNext": true,
+  "next": "cursor-page-2-test"
+}

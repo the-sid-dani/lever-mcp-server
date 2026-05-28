@@ -1,0 +1,123 @@
+{
+  "data": [
+    {
+      "id": "d902845c-d1db-4e5e-8d17-481d1473ec3e",
+      "name": "Test Candidate",
+      "contact": "3668a4d7-c620-41d6-8949-33e1fd843cf3",
+      "headline": "REDACTED_HEADLINE",
+      "stage": "lead-new",
+      "confidentiality": "non-confidential",
+      "location": "REDACTED_LOCATION",
+      "phones": [],
+      "emails": [
+        "test@example.com"
+      ],
+      "links": [],
+      "archived": null,
+      "tags": [],
+      "sources": [
+        "referral"
+      ],
+      "stageChanges": [
+        {
+          "toStageId": "lead-new",
+          "toStageIndex": 0,
+          "updatedAt": 1779466058940,
+          "userId": "68224add-5829-4105-807d-d39be8da9f95"
+        }
+      ],
+      "origin": "REDACTED_ORIGIN",
+      "sourcedBy": "68224add-5829-4105-807d-d39be8da9f95",
+      "owner": "68224add-5829-4105-807d-d39be8da9f95",
+      "followers": [
+        "68224add-5829-4105-807d-d39be8da9f95"
+      ],
+      "applications": [],
+      "createdAt": 1779466058940,
+      "updatedAt": 1779466059091,
+      "lastInteractionAt": 1779466058940,
+      "lastAdvancedAt": 1779466058940,
+      "snoozedUntil": null,
+      "urls": {
+        "list": "https://hire.lever.co/candidates",
+        "show": "https://hire.lever.co/candidates/d902845c-d1db-4e5e-8d17-481d1473ec3e"
+      },
+      "isAnonymized": false,
+      "dataProtection": {
+        "store": {
+          "allowed": true,
+          "expiresAt": null
+        },
+        "contact": {
+          "allowed": true,
+          "expiresAt": null
+        }
+      }
+    },
+    {
+      "id": "2a40701b-7e6e-4b8b-a45d-1207799ca309",
+      "name": "Test Candidate",
+      "contact": "04f01f06-c867-4eb6-95fb-8ed6fc9bbc9f",
+      "headline": "REDACTED_HEADLINE",
+      "stage": "lead-new",
+      "confidentiality": "non-confidential",
+      "location": "REDACTED_LOCATION",
+      "phones": [],
+      "emails": [
+        "test@example.com"
+      ],
+      "links": [],
+      "archived": {
+        "reason": "67345a7c-1903-4954-92b2-5dc8c21d4ef9",
+        "archivedAt": 1779460142661
+      },
+      "tags": [],
+      "sources": [
+        "referral"
+      ],
+      "stageChanges": [
+        {
+          "toStageId": "lead-new",
+          "toStageIndex": 0,
+          "updatedAt": 1776195600787,
+          "userId": "598a9bfd-2494-4118-9b86-f6288ec5d51e"
+        }
+      ],
+      "origin": "REDACTED_ORIGIN",
+      "sourcedBy": "598a9bfd-2494-4118-9b86-f6288ec5d51e",
+      "owner": "598a9bfd-2494-4118-9b86-f6288ec5d51e",
+      "followers": [
+        "598a9bfd-2494-4118-9b86-f6288ec5d51e",
+        "10c9cbfb-bf20-4fb5-8404-845f55ab7270",
+        "fce71a86-febc-42ab-853d-6a2e62a9ee61",
+        "70b52165-359a-408f-859f-9acd0f36692e"
+      ],
+      "applications": [
+        "5b03bded-67df-4fb5-878f-e09d6e4c0d73"
+      ],
+      "createdAt": 1776195600787,
+      "updatedAt": 1779460143041,
+      "lastInteractionAt": 1779460142663,
+      "lastAdvancedAt": 1779460142663,
+      "snoozedUntil": null,
+      "urls": {
+        "list": "https://hire.lever.co/candidates",
+        "show": "https://hire.lever.co/candidates/2a40701b-7e6e-4b8b-a45d-1207799ca309"
+      },
+      "isAnonymized": false,
+      "dataProtection": {
+        "store": {
+          "allowed": true,
+          "expiresAt": 1810996142661
+        },
+        "contact": {
+          "allowed": true,
+          "expiresAt": 1810996142661
+        }
+      },
+      "opportunityLocation": "unspecified"
+    }
+  ],
+  "hasNext": true,
+  "next": "%5B1%2C1779397451223%2C%22991d8354-02f4-4b11-a59a-052be21e46a1%22%5D"
+}
