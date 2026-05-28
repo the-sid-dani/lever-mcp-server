@@ -93,6 +93,12 @@ export class GoogleWorkspaceVerifier {
       return null;
     }
 
+    // Defense-in-depth on top of the hd gate: require a verified email claim.
+    if (payload.email_verified !== true) {
+      console.info('Google ID token rejected: email_verified not true');
+      return null;
+    }
+
     return {
       email: payload.email as string,
       hd: hd,

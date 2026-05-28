@@ -168,6 +168,17 @@ export class GoogleOAuthBroker implements OAuthServerProvider {
     params: AuthorizationParams,
     res: Response
   ): Promise<void> {
+    // Evict abandoned pending-auth entries (sign-ins that never hit /callback).
+    // authCodes/accessTokens self-evict on access; pendingAuth has no such path,
+    // so sweep here using the same TTL applied to code expiry. No timers (avoids
+    // leaking an interval in tests / under Cloud Run).
+    const cutoff = Date.now() - AUTH_CODE_TTL_S * 1000;
+    for (const [key, entry] of this.pendingAuth) {
+      if (entry.createdAt < cutoff) {
+        this.pendingAuth.delete(key);
+      }
+    }
+
     const googleState = newToken('gs');
     this.pendingAuth.set(googleState, {
       mcpClientId: client.client_id,

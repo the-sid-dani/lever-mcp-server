@@ -124,6 +124,19 @@ describe('GoogleWorkspaceVerifier', () => {
     expect(await verifier.verify('wrong-hd-token')).toBeNull();
   });
 
+  it('returns null when email_verified is not true (valid hd)', async () => {
+    (jwtVerify as any).mockResolvedValueOnce({
+      payload: makeValidPayload({ email_verified: false }),
+    });
+
+    const { GoogleWorkspaceVerifier } = await import('../google-verifier.js');
+    const verifier = new GoogleWorkspaceVerifier({
+      googleClientId: GOOGLE_CLIENT_ID,
+      hostedDomain: HOSTED_DOMAIN,
+    });
+    expect(await verifier.verify('unverified-email-token')).toBeNull();
+  });
+
   it('returns null when the token is expired (jose rejects)', async () => {
     (jwtVerify as any).mockRejectedValueOnce(new Error('JWTExpired'));
 

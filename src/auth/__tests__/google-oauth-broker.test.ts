@@ -114,6 +114,55 @@ describe('GoogleOAuthBroker authorize', () => {
     expect(parsed.searchParams.get('response_type')).toBe('code');
     expect(parsed.searchParams.get('prompt')).toBe('select_account');
   });
+
+  it('sweeps stale pendingAuth entries on a subsequent authorize()', async () => {
+    const { broker } = makeBroker();
+
+    // Seed a stale pending entry directly (createdAt older than AUTH_CODE_TTL = 300s).
+    const stalePending = (broker as any).pendingAuth as Map<string, any>;
+    stalePending.set('gs_stale', {
+      mcpClientId: 'mcp-client-1',
+      mcpRedirectUri: 'https://claude.ai/api/mcp/auth_callback',
+      mcpState: 'old-state',
+      mcpScopes: ['openid', 'email'],
+      mcpCodeChallenge: 'old-challenge',
+      mcpResource: null,
+      createdAt: Date.now() - 301 * 1000,
+    });
+    expect(stalePending.has('gs_stale')).toBe(true);
+
+    const client = makeClient();
+    const redirectSpy = vi.fn();
+    const res = { redirect: redirectSpy } as unknown as Response;
+    await broker.authorize(client, AUTH_PARAMS, res);
+
+    // The stale entry is evicted; the freshly-stashed one survives.
+    expect(stalePending.has('gs_stale')).toBe(false);
+    const fresh = new URL(redirectSpy.mock.calls[0]![0] as string).searchParams.get('state')!;
+    expect(stalePending.has(fresh)).toBe(true);
+  });
+
+  it('keeps non-stale pendingAuth entries when authorize() sweeps', async () => {
+    const { broker } = makeBroker();
+
+    const pending = (broker as any).pendingAuth as Map<string, any>;
+    pending.set('gs_fresh', {
+      mcpClientId: 'mcp-client-1',
+      mcpRedirectUri: 'https://claude.ai/api/mcp/auth_callback',
+      mcpState: 'recent-state',
+      mcpScopes: ['openid', 'email'],
+      mcpCodeChallenge: 'recent-challenge',
+      mcpResource: null,
+      createdAt: Date.now() - 10 * 1000,
+    });
+
+    const client = makeClient();
+    const redirectSpy = vi.fn();
+    const res = { redirect: redirectSpy } as unknown as Response;
+    await broker.authorize(client, AUTH_PARAMS, res);
+
+    expect(pending.has('gs_fresh')).toBe(true);
+  });
 });
 
 describe('GoogleOAuthBroker handleGoogleCallback', () => {
