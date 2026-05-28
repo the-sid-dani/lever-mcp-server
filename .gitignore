@@ -166,11 +166,6 @@ dist
 .yarn/install-state.gz
 .pnp.\*
 
-# wrangler project
-
-.dev.vars
-.wrangler/
-
 # Local tooling state (Claude Code skills, bloks/tldr cache, CCw workflow state, autonomous skill state)
 .claude/
 .tldr/

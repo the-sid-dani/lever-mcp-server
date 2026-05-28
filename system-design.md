@@ -40,7 +40,7 @@ v1 shipped 2026-02-03 (commit `38e4768 feat(auth): Add OAuth 2.1 with Auth0 for 
 | Auth (env-toggle) | OAuth 2.1 + Auth0; falls back to Cloud Run IAM when `OAUTH_ENABLED=false` |
 | Live tool count | 17 (see §8) |
 | LOC (live code) | ~4,325 across 7 source files |
-| LOC (dead code) | 1,322 in `src/index.ts` (Cloudflare Workers era, never imported, removal in v3 M1) |
+| LOC (dead code) | None — 1,322 LOC of Cloudflare Workers `src/index.ts` removed in v3 M1 (commit `0c369eb` on `refactor/v3`) |
 
 ### v1 acceptance state
 
@@ -49,7 +49,7 @@ v1 shipped 2026-02-03 (commit `38e4768 feat(auth): Add OAuth 2.1 with Auth0 for 
 | MCP server connects to Lever APIs | ✅ shipped |
 | Candidate and opportunity tools | ✅ shipped (17 tools) |
 | Authentication flow working | ✅ shipped (OAuth 2.1 + Auth0) |
-| Documentation complete | ⚠️ partial — README + repo CLAUDE.md describe outdated Cloudflare architecture |
+| Documentation complete | ✅ shipped — README + repo CLAUDE.md rewritten in v3 M2 to describe Express + Cloud Run + Auth0 architecture |
 | Webhook support for real-time updates | ❌ not shipped (deferred to v3 M6 as registration-only; ingestion sink stays out of scope) |
 
 ## 3. Architecture
@@ -90,7 +90,7 @@ v1 shipped 2026-02-03 (commit `38e4768 feat(auth): Add OAuth 2.1 with Auth0 for 
 ```
 src/
 ├── server.ts                 # Cloud Run entry, Express setup, MCP transport wiring (237 LOC)
-├── index.ts                  # DEAD — Cloudflare Workers McpAgent class (1,322 LOC, removed in v3 M1)
+│                              # (index.ts deleted in v3 M1 — was 1,322 LOC of dead Cloudflare Workers McpAgent code)
 ├── tools.ts                  # registerAllTools — registers 7 tools inline + dispatches to others (425 LOC)
 ├── additional-tools.ts       # 8 more tool registrations + formatter helpers (997 LOC, split in v3 M3a)
 ├── interview-tools.ts        # 2 interview-specific tool registrations (480 LOC)
