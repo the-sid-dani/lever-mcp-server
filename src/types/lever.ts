@@ -170,3 +170,147 @@ export interface LeverInterview {
 	/** Array of posting IDs associated with this interview */
 	postings: string[];
 }
+
+// --- M3a type-tightening (VAL-202) ---------------------------------------
+// Lean response shapes for high-traffic read methods + write bodies. Every
+// interface carries an index signature so downstream tool handlers that index
+// by arbitrary string keys keep type-checking, and so forward-compat fields
+// from the Lever API do not require schema churn. Only fields actually read by
+// the client/formatters/tool handlers are named explicitly.
+
+/** Lever note (GET /opportunities/:id/notes). */
+export interface LeverNote {
+	id: string;
+	value?: string;
+	user?: string | null;
+	secret?: boolean;
+	createdAt?: number | null;
+	deletedAt?: number | null;
+	fields?: unknown;
+	[k: string]: unknown;
+}
+
+/** Field on a feedback form or template. */
+export interface LeverFeedbackField {
+	id: string;
+	type?: string;
+	required?: boolean;
+	text?: string;
+	value?: unknown;
+	[k: string]: unknown;
+}
+
+/** Lever feedback form (GET /opportunities/:id/feedback). */
+export interface LeverFeedback {
+	id: string;
+	text?: string;
+	instructions?: string;
+	user?: string | null;
+	interview?: string | null;
+	panel?: string | null;
+	baseTemplateId?: string | null;
+	template?: string | null;
+	createdAt?: number | null;
+	completedAt?: number | null;
+	fields?: LeverFeedbackField[];
+	[k: string]: unknown;
+}
+
+/** Lever feedback template (GET /feedback_templates). */
+export interface LeverFeedbackTemplate {
+	id: string;
+	text?: string;
+	name?: string;
+	instructions?: string;
+	fields?: LeverFeedbackField[];
+	[k: string]: unknown;
+}
+
+/** Lever email record (GET /opportunities/:id/emails). */
+export interface LeverEmail {
+	id: string;
+	subject?: string;
+	body?: string;
+	createdAt?: number | null;
+	[k: string]: unknown;
+}
+
+/** Lever pipeline stage (GET /stages). */
+export interface LeverStage {
+	id: string;
+	text?: string;
+	[k: string]: unknown;
+}
+
+/** Lever archive reason (GET /archive_reasons). */
+export interface LeverArchiveReason {
+	id: string;
+	text?: string;
+	[k: string]: unknown;
+}
+
+/** Lever requisition (GET /requisitions). */
+export interface LeverRequisition {
+	id: string;
+	requisitionCode?: string;
+	name?: string;
+	status?: string;
+	headcountTotal?: number;
+	headcountHired?: number;
+	employmentStatus?: string;
+	location?: string;
+	team?: string;
+	department?: string;
+	confidentiality?: string;
+	compensationBand?: {
+		currency?: string;
+		min?: number;
+		max?: number;
+		interval?: string;
+		[k: string]: unknown;
+	} | null;
+	owner?: string;
+	hiringManager?: string;
+	creator?: string;
+	backfill?: boolean;
+	postings?: string[];
+	approval?: unknown;
+	customFields?: unknown;
+	internalNotes?: string;
+	createdAt?: number;
+	updatedAt?: number;
+	closedAt?: number;
+	[k: string]: unknown;
+}
+
+/** Lever application (GET /opportunities/:id/applications). */
+export interface LeverApplication {
+	id: string;
+	posting?: { id?: string; text?: string } | string;
+	status?: string;
+	createdAt?: number;
+	user?: { id?: string; name?: string } | string;
+	[k: string]: unknown;
+}
+
+/** Lever file / resume (GET /opportunities/:id/files | /resumes). */
+export interface LeverFile {
+	id: string;
+	name?: string;
+	filename?: string;
+	mimetype?: string;
+	type?: string;
+	size?: number;
+	downloadUrl?: string;
+	url?: string;
+	createdAt?: number;
+	file?: {
+		name?: string;
+		ext?: string;
+		size?: number;
+		downloadUrl?: string;
+		[k: string]: unknown;
+	};
+	source?: string;
+	[k: string]: unknown;
+}
