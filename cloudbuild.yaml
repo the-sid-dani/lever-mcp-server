@@ -56,10 +56,16 @@ steps:
       - '2Gi'
       - '--cpu'
       - '2'
+      # Pinned to a SINGLE warm instance. The OAuth broker holds access tokens +
+      # MCP sessions in per-instance memory, so a token minted on one instance
+      # 401s if a later request routes to another. min=1 keeps it warm (token
+      # survives idle within its 1h TTL); max=1 keeps all requests on the same
+      # in-memory store. Revisit (raise max) only after the token store is
+      # externalized to Firestore/Redis. Fine for an internal team-scale tool.
       - '--min-instances'
-      - '0'
+      - '1'
       - '--max-instances'
-      - '10'
+      - '1'
       - '--timeout'
       - '300s'
       - '--set-secrets'
