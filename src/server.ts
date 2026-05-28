@@ -10,13 +10,14 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { registerAllTools } from "./tools.js";
 import {
-	validateRequestAuth,
 	getProtectedResourceMetadata,
 	OAUTH_CONFIG,
 	validateOAuthConfig,
 	isOAuthEnabled,
+	GoogleOAuthBroker,
 } from "./auth/index.js";
 
 const require = createRequire(import.meta.url);
@@ -71,6 +72,53 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 	next();
 });
 
+// Google OAuth broker - self-enables ONLY when GOOGLE_OAUTH_CLIENT_ID + SECRET
+// are set. Otherwise OAuth is disabled and the server falls back to Cloud Run
+// IAM gating (LEVER_DEFAULT_USER_ID).
+let broker: GoogleOAuthBroker | undefined;
+if (isOAuthEnabled()) {
+	const mcpPublicUrl = OAUTH_CONFIG.mcpPublicUrl;
+	const googleRedirectUri = `${mcpPublicUrl.replace(/\/$/, "")}/oauth/google/callback`;
+	broker = new GoogleOAuthBroker({
+		googleClientId: OAUTH_CONFIG.googleClientId,
+		googleClientSecret: OAUTH_CONFIG.googleClientSecret,
+		googleRedirectUri,
+		hostedDomain: OAUTH_CONFIG.hostedDomain,
+		mcpPublicUrl,
+	});
+
+	// Serve standard MCP AS endpoints at the application root:
+	//   /.well-known/oauth-authorization-server, /authorize, /token,
+	//   /register, /revoke. MUST be mounted before the /mcp handler.
+	app.use(
+		mcpAuthRouter({
+			provider: broker,
+			issuerUrl: new URL(mcpPublicUrl),
+			resourceServerUrl: new URL(mcpPublicUrl),
+			scopesSupported: ["openid", "email"],
+			// DCR (/register) and revocation (/revoke) are enabled by the
+			// provider exposing clientsStore + revokeToken; no extra opts needed.
+		}),
+	);
+
+	// Google OAuth callback - completes the broker round-trip and redirects
+	// back to the MCP client with the minted authorization code.
+	app.get("/oauth/google/callback", async (req: Request, res: Response) => {
+		try {
+			const url = await broker!.handleGoogleCallback(
+				String(req.query.code),
+				String(req.query.state),
+			);
+			res.redirect(url);
+		} catch (e) {
+			res.status(400).json({
+				error: "invalid_request",
+				error_description: String((e as Error).message),
+			});
+		}
+	});
+}
+
 // Store active transports by session ID
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -87,9 +135,9 @@ app.get("/health", (_req: Request, res: Response) => {
 
 // Readiness check endpoint for dependency availability
 app.get("/readyz", async (_req: Request, res: Response) => {
-	const checks = {
+	const checks: { leverApiKey: string; googleJwks: string } = {
 		leverApiKey: process.env.LEVER_API_KEY ? "ok" : "missing",
-		jwks: "skipped",
+		googleJwks: "skipped",
 	};
 
 	if (isOAuthEnabled()) {
@@ -97,20 +145,21 @@ app.get("/readyz", async (_req: Request, res: Response) => {
 		const timeout = setTimeout(() => controller.abort(), 2_000);
 
 		try {
-			const response = await fetch(`${OAUTH_CONFIG.auth0Issuer}/.well-known/jwks.json`, {
+			const response = await fetch("https://www.googleapis.com/oauth2/v3/certs", {
 				method: "HEAD",
 				signal: controller.signal,
 			});
 
-			checks.jwks = response.ok ? "ok" : "degraded";
+			checks.googleJwks = response.ok ? "ok" : "degraded";
 		} catch {
-			checks.jwks = "degraded";
+			checks.googleJwks = "degraded";
 		} finally {
 			clearTimeout(timeout);
 		}
 	}
 
-	const ready = checks.leverApiKey === "ok" && checks.jwks !== "degraded";
+	// Readiness gates on Lever API key only; Google JWKS is informational.
+	const ready = checks.leverApiKey === "ok";
 	res.status(ready ? 200 : 503).json({
 		status: ready ? "ready" : "not_ready",
 		checks,
@@ -166,19 +215,30 @@ function getResourceMetadataUrl(req: Request): string {
 
 // MCP endpoint - handles all MCP protocol messages
 app.all("/mcp", async (req: Request, res: Response) => {
-	// OAuth authentication check (when enabled)
-	if (isOAuthEnabled()) {
-		const authResult = await validateRequestAuth(req);
-		if (!authResult.valid) {
+	// OAuth authentication check (when enabled) - via the Google OAuth broker.
+	if (isOAuthEnabled() && broker) {
+		const authHeader = req.headers.authorization;
+		const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
+		if (!token) {
 			const resourceMetadataUrl = getResourceMetadataUrl(req);
 			res
 				.status(401)
 				.header("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`)
-				.json({ error: "unauthorized", message: authResult.error });
+				.json({ error: "unauthorized", message: "Bearer token required" });
 			return;
 		}
-		// Log authenticated user for audit trail
-		console.log(`[MCP] Authenticated user: ${authResult.user.email || authResult.user.sub}`);
+		try {
+			const authInfo = await broker.verifyAccessToken(token);
+			// Log authenticated user for audit trail. Email lives in extra.email.
+			console.log(`[MCP] Authenticated user: ${authInfo.extra?.email}`);
+		} catch (e) {
+			const resourceMetadataUrl = getResourceMetadataUrl(req);
+			res
+				.status(401)
+				.header("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`)
+				.json({ error: "invalid_token", message: String((e as Error).message) });
+			return;
+		}
 	}
 
 	// Check for existing session
@@ -255,7 +315,7 @@ app.listen(PORT, () => {
 			service: "lever-mcp-server",
 			version: SERVER_VERSION,
 			port: PORT,
-			authMode: isOAuthEnabled() ? "OAuth 2.1 (Auth0)" : "Cloud Run IAM",
+			authMode: isOAuthEnabled() ? "OAuth 2.1 (Google broker)" : "Cloud Run IAM",
 			endpoints: ["/health", "/.well-known/oauth-protected-resource", "/mcp"],
 			mcpProtocolVersion: MCP_PROTOCOL_VERSION,
 		}),

@@ -1,6 +1,7 @@
 // Auth module exports
-export { bearerAuth, validateBearerToken, validateRequestAuth } from './middleware.js';
-export type { AuthenticatedRequest } from './middleware.js';
 export { OAUTH_CONFIG, validateOAuthConfig, isOAuthEnabled } from './constants.js';
 export { getProtectedResourceMetadata } from './metadata.js';
-export type { Auth0TokenPayload, AuthenticatedUser } from './types.js';
+export { GoogleOAuthBroker } from './google-oauth-broker.js';
+export type { GoogleOAuthBrokerOptions } from './google-oauth-broker.js';
+export { GoogleWorkspaceVerifier } from './google-verifier.js';
+export type { GoogleClaims, GoogleWorkspaceVerifierOptions } from './google-verifier.js';
