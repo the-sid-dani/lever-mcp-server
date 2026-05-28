@@ -211,7 +211,22 @@ npm test         # vitest run (full suite, exits on first failure)
 npm run test:watch
 ```
 
-Current tests: `src/auth/__tests__/middleware.test.ts` (8 tests). Tool-level tests land in v3 M4 — fixtures already captured in `test-fixtures/lever-api/`.
+Current tests: `src/auth/__tests__/middleware.test.ts` (14 tests). Tool-level tests land in v3 M4 — fixtures already captured in `test-fixtures/lever-api/`.
+
+### End-to-end tool smoke harness
+
+`scripts/smoke-all-tools.mjs` drives all 17 tools over the real Streamable HTTP transport and prints a pass/fail table. **Read-only by default** — write/mutating tools are skipped unless `SMOKE_WRITES=1`.
+
+```bash
+# Terminal 1 — boot a dev server (reads LEVER_API_KEY from env):
+set -a && source ~/.second-brain-os.env && set +a
+PORT=8095 LEVER_DEFAULT_USER_ID=<your-lever-uuid> OAUTH_ENABLED=false npm run dev
+
+# Terminal 2 — run the harness:
+MCP_URL=http://localhost:8095/mcp node scripts/smoke-all-tools.mjs
+```
+
+Env knobs: `SMOKE_OPP_ID` (seed a known opportunity UUID for id-dependent reads instead of scraping one from search), `SMOKE_WRITES=1` (also run write tools). Exit code 0 = all non-skipped tools passed.
 
 ---
 
