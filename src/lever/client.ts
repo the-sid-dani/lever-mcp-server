@@ -7,6 +7,7 @@ import type {
 	LeverUser,
 } from "../types/lever.js";
 import { randomUUID } from "node:crypto";
+import { logger } from "../utils/logger.js";
 
 // Simple token bucket implementation for rate limiting
 class TokenBucket {
@@ -91,7 +92,7 @@ export class LeverClient {
 			}
 
 			const traceId = randomUUID();
-			console.log(`[API-TRACE ${traceId}] START ${method} ${endpoint}`);
+			logger.debug(`[API-TRACE ${traceId}] START ${method} ${endpoint}`);
 			const startTime = Date.now();
 
 			// Abort a hung connection so it cannot stall the serialized queue.
@@ -111,10 +112,9 @@ export class LeverClient {
 				});
 
 				const duration = Date.now() - startTime;
-				console.log(`[API-TRACE ${traceId}] Response: ${response.status} | Duration: ${duration}ms | Attempt: ${attemptCount + 1}`);
+				logger.debug(`[API-TRACE ${traceId}] Response: ${response.status} | Duration: ${duration}ms | Attempt: ${attemptCount + 1}`);
 
 				if (!response.ok) {
-					const errorText = await response.text();
 					
 					// Handle rate limiting specifically
 					if (response.status === 429) {
@@ -123,7 +123,7 @@ export class LeverClient {
 							? parseInt(retryAfter) * 1000 
 							: Math.min(2 ** attemptCount * 1000, 30000); // Max 30s
 						
-						console.error(`Rate limited (429). Waiting ${waitTime}ms before retry...`);
+						logger.warn(`Rate limited (429) on ${endpoint}. Waiting ${waitTime}ms before retry...`);
 						
 						if (attemptCount < 3) {
 							await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -135,7 +135,7 @@ export class LeverClient {
 					
 					// Retry on server errors (5xx) but not client errors (4xx)
 					if (response.status >= 500 && attemptCount < 2) {
-						console.error(`Lever API error ${response.status}, retrying... (attempt ${attemptCount + 1}/3)`);
+						logger.warn(`Lever API error ${response.status} on ${endpoint}, retrying... (attempt ${attemptCount + 1}/3)`);
 						// Wait before retrying (exponential backoff)
 						await new Promise(resolve => setTimeout(resolve, 2 ** attemptCount * 1000));
 						return attempt(attemptCount + 1);
@@ -143,27 +143,27 @@ export class LeverClient {
 					
 					// Log 404 errors specifically
 					if (response.status === 404) {
-						console.error(`Lever API 404: Resource not found at ${endpoint}`);
+						logger.error(`Lever API 404: Resource not found at ${endpoint}`);
 					}
 					
-					throw new Error(`Lever API error: ${response.status} - ${errorText}`);
+					throw new Error(`Lever API error: ${response.status} on ${endpoint}`);
 				}
 
 				const responseData = await response.json();
 				
 				// Log if we get an empty response
 				if (!responseData || (typeof responseData === 'object' && Object.keys(responseData).length === 0)) {
-					console.warn(`Empty response from Lever API for ${endpoint}`);
+					logger.debug(`Empty response from Lever API for ${endpoint}`);
 				}
 				
-				console.log(`[API-TRACE ${traceId}] SUCCESS | Total duration: ${Date.now() - startTime}ms`);
+				logger.debug(`[API-TRACE ${traceId}] SUCCESS | Total duration: ${Date.now() - startTime}ms`);
 				return responseData as T;
 			} catch (error) {
 				// Treat a timeout/abort as a retryable error.
 				const isAbort = (error as Error)?.name === "AbortError";
 				const isNetwork = error instanceof TypeError && error.message.includes('fetch');
 				if (attemptCount < 2 && (isNetwork || isAbort)) {
-					console.error(`${isAbort ? 'Request timed out' : 'Network error'}, retrying... (attempt ${attemptCount + 1}/3)`);
+					logger.warn(`${isAbort ? 'Request timed out' : 'Network error'} on ${endpoint}, retrying... (attempt ${attemptCount + 1}/3)`);
 					await new Promise(resolve => setTimeout(resolve, 2 ** attemptCount * 1000));
 					return attempt(attemptCount + 1);
 				}
@@ -215,7 +215,7 @@ export class LeverClient {
 		
 		// Debug logging
 		if (response && response.data && response.data.length > 0) {
-			console.log(`getOpportunities: Got ${response.data.length} candidates, first has name: ${response.data[0]!.name || 'NO_NAME'}`);
+			logger.debug(`getOpportunities: Got ${response.data.length} candidates, first has name: ${response.data[0]!.name || 'NO_NAME'}`);
 		}
 		
 		return response;
@@ -233,16 +233,16 @@ export class LeverClient {
 			
 			// Check if the API returned null or undefined
 			if (!response || !response.data) {
-				console.error(`API returned null/undefined for opportunity ${id}`);
+				logger.error(`API returned null/undefined for opportunity ${id}`);
 				throw new Error(`Opportunity ${id} not found - API returned empty response`);
 			}
 			
 			// Log successful fetch for debugging
-			console.log(`Successfully fetched opportunity ${id}, has data: ${!!response.data}`);
-			console.log(`Opportunity data:`, JSON.stringify(response).substring(0, 200));
+			logger.debug(`Successfully fetched opportunity ${id}, has data: ${!!response.data}`);
+			logger.debug(`Opportunity data:`, JSON.stringify(response).substring(0, 200));
 			return response;
 		} catch (error) {
-			console.error(`Failed to fetch opportunity ${id}:`, error);
+			logger.error(`Failed to fetch opportunity ${id}: ${(error as Error)?.name || "error"}`);
 			throw error;
 		}
 	}
@@ -444,7 +444,7 @@ export class LeverClient {
 			offset = response.next;
 		}
 		
-		console.log(`getPostingsByOwner: Fetched ${allPostings.length} postings in ${batchesFetched} batches for owner search: ${ownerName}`);
+		logger.debug(`getPostingsByOwner: Fetched ${allPostings.length} postings in ${batchesFetched} batches for owner search: ${ownerName}`);
 		
 		// Filter by owner name (case-insensitive partial match)
 		const filteredPostings = allPostings.filter(posting => {
@@ -454,7 +454,7 @@ export class LeverClient {
 			return false;
 		});
 		
-		console.log(`getPostingsByOwner: Found ${filteredPostings.length} postings for ${ownerName}`);
+		logger.debug(`getPostingsByOwner: Found ${filteredPostings.length} postings for ${ownerName}`);
 		
 		return {
 			data: filteredPostings,
