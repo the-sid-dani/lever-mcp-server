@@ -844,6 +844,23 @@ export class LeverClient {
 			interview?: string;
 			panel?: string;
 			performAs?: string;
+			/**
+			 * When true (default), sets completedAt to Date.now() in the POST body
+			 * so Lever marks the feedback form as submitted/complete. When false,
+			 * omits completedAt → feedback record is created as a DRAFT visible in
+			 * the Lever UI but not yet finalized.
+			 *
+			 * Empirical finding 2026-05-28: omitting completedAt creates a draft,
+			 * NOT a submitted form (despite Lever docs saying "Defaults to now").
+			 * Manish Katheeth feedback (e098e104) was stuck as draft for ~11h
+			 * until manually completed in the UI. Fixed by sending completedAt.
+			 */
+			markComplete?: boolean;
+			/**
+			 * Explicit completion timestamp (ms). If set, overrides markComplete.
+			 * Used for backdating feedback to match the actual interview time.
+			 */
+			completedAt?: number;
 		},
 	): Promise<any> {
 		const data: any = {
@@ -852,6 +869,16 @@ export class LeverClient {
 		};
 		if (options?.interview) data.interview = options.interview;
 		if (options?.panel) data.panel = options.panel;
+
+		// completedAt semantics:
+		//   explicit number → use as-is (backdating)
+		//   markComplete !== false → Date.now() (default: submit-as-complete)
+		//   markComplete === false → omit → draft mode
+		if (typeof options?.completedAt === "number") {
+			data.completedAt = options.completedAt;
+		} else if (options?.markComplete !== false) {
+			data.completedAt = Date.now();
+		}
 
 		const params: any = {};
 		if (options?.performAs) {

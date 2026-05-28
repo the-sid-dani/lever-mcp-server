@@ -1174,6 +1174,7 @@ export function registerAdditionalTools(
 			})).optional().describe("For action='submit' only — array of {id, value} pairs matching the template's required fields. Posted to Lever as `fieldValues[]` (write-shape; asymmetric with GET response `fields[]`)."),
 			interview_id: z.string().optional().describe("For action='submit' only — interview UID to link feedback to (required if panel_id specified)."),
 			panel_id: z.string().optional().describe("For action='submit' only — interview panel UID (required if interview_id specified)."),
+			mark_complete: z.boolean().default(true).optional().describe("For action='submit' only — when true (default), marks feedback as submitted/complete via completedAt timestamp. When false, creates as draft in the Lever UI for human review before finalization. (Lever quirk: omitting completedAt = draft, contradicting their docs.)"),
 		},
 		async (args) => {
 			try {
@@ -1291,6 +1292,7 @@ export function registerAdditionalTools(
 								interview: args.interview_id,
 								panel: args.panel_id,
 								performAs,
+								markComplete: args.mark_complete ?? true,
 							},
 						);
 						return {
@@ -1302,6 +1304,8 @@ export function registerAdditionalTools(
 									template_text: result?.data?.text,
 									user: result?.data?.user,
 									created_at: result?.data?.createdAt,
+									completed_at: result?.data?.completedAt ?? null,
+									status: result?.data?.completedAt ? "submitted" : "draft",
 								}, null, 2),
 							}],
 						};
