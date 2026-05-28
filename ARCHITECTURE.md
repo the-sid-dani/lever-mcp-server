@@ -8,73 +8,54 @@ For the full system design (decision rationale, alternatives evaluated, decision
 
 ## Request flow
 
-### Happy path (multi-tenant v3 target)
+### Happy path (multi-tenant v3 target — Google OAuth broker)
+
+The server is its **own** OAuth 2.1 Authorization Server, federating to Google. No Auth0 in the login path. (Ported from the MSCI MCP's `oauth_broker.py`.)
 
 ```
 ┌─────────────────┐                                              ┌──────────────────┐
 │  Claude         │  1. MCP request (no token)                   │  Lever MCP       │
-│  (MCP client)   │ ───────────────────────────────────────────► │  Server          │
-└─────────────────┘                                              │  (Cloud Run)     │
-        ▲                                                        └────────┬─────────┘
-        │                                                                 │
-        │                                       2. 401 Unauthorized
-        │                                          + WWW-Authenticate header
-        │                                          (with resource_metadata URL)
-        │                                                                 │
+│  (MCP client)   │ ───────────────────────────────────────────► │  (we are the AS) │
+└─────────────────┘                                              └────────┬─────────┘
+        ▲                                                                 │
+        │  2. 401 + WWW-Authenticate (resource_metadata → OUR /.well-known)│
         │                                                                 ▼
-        │                                                        Auth0 discovery
-        │ 3. OAuth 2.1 authorization code + PKCE flow                     │
-        ├──────────────────────────────────────────────────────────┐      │
+        │  3. DCR: POST /register  →  Claude self-registers a client
+        │  4. GET /authorize (PKCE S256)                                  │
+        ├─────────────────────────────────────────────────────────┐      │
         │                                                          ▼      │
-        │  ┌────────────────────────────────────────────────────────────┐ │
-        │  │  Auth0 (OAuth 2.1 AS)                                      │ │
-        │  │  + Google Workspace Enterprise Connection                  │ │
-        │  │    (domain-restricted to samba.tv)                         │ │
-        │  │  + Post-Login Action (defense in depth: reject non-@samba) │ │
-        │  └────────────────────────────────────────────────────────────┘ │
-        │                                                                 │
-        │ 4. Bearer JWT (RS256)                                           │
-        │    - audience: https://lever-mcp-201626763325.us-central1.run.app
-        │    - claims: email, email_verified, hd, name, sub               │
-        │                                                                 │
+        │   Lever broker stashes the request, redirects user to Google:   │
+        │   accounts.google.com/o/oauth2/v2/auth                          │
+        │     scope=openid email profile, hd=samba.tv, prompt=select_acct │
+        │                                                          │      │
+        │                          5. Google → GET /oauth/google/callback?code
+        │                             - exchange code → Google ID token   │
+        │                             - validate RS256 (Google JWKS), iss │
+        │                             - enforce hd == samba.tv  ◄── domain gate
+        │                             - mint opaque MCP code ↔ email       │
+        │  6. redirect back to Claude with MCP code                       │
+        │  7. POST /token → opaque Bearer access token (1h TTL ↔ email)   │
         ▼                                                                 │
    ┌──────────────────────────────────────────────────────────────────────┘
-   │ 5. MCP request with `Authorization: Bearer <jwt>`
+   │ 8. MCP request with `Authorization: Bearer <opaque>`
    ▼
 ┌──────────────────┐
-│  Lever MCP       │   6. Validate JWT
-│  Server          │      - signature via Auth0 JWKS (cached, jose.createRemoteJWKSet)
-│  middleware      │      - aud, iss, exp claims
-│                  │      - extract email claim
-│                  │
-│                  │   7. perform-as-resolver
+│  Lever MCP       │   9. Validate opaque token → resolve email
+│  Server          │  10. perform-as-resolver
 │                  │      - cache hit → return Lever user ID
-│                  │      - cache miss → GET /v1/users?email=<email>
-│                  │      - cache result with 1h TTL
-│                  │      - resolver returns null AND OAUTH_ENABLED=true
-│                  │        → throw PerformAsUnresolvedError
-│                  │      - OAUTH_ENABLED=false (cron, internal)
-│                  │        → fallback to LEVER_DEFAULT_USER_ID
-│                  │
-│                  │   8. Tool dispatch (zod-validated args)
-│                  │
-│                  │   9. Lever REST API call via client-write.ts
-│                  │      - attach perform_as=<resolved-user-id>
-│                  │      - rate-limited via shared token bucket singleton
+│                  │      - cache miss → GET /v1/users?email=<email> (1h TTL)
+│                  │      - null AND OAUTH_ENABLED=true → PerformAsUnresolvedError
+│                  │      - OAUTH_ENABLED=false (cron) → LEVER_DEFAULT_USER_ID
+│                  │  11. Tool dispatch (zod-validated) → Lever REST
+│                  │      - attach perform_as, rate-limited via shared bucket
 └────────┬─────────┘
          ▼
-┌──────────────────┐
-│  Lever ATS API   │   10. Process write
-│  (api.lever.co)  │   11. Return response
-└────────┬─────────┘
-         │
-         ▼
-   Response formatted (formatOpportunity, etc.), returned to Claude
+   Lever ATS API → response formatted, returned to Claude
 ```
 
-### Current single-tenant fallback (pre-v3-M3b)
+### Current single-tenant fallback (`OAUTH_ENABLED=false`)
 
-When `OAUTH_ENABLED=false` OR when running locally without a configured Auth0 tenant: server skips JWT validation, gates at the Cloud Run IAM layer (Google service-account auth), attaches `LEVER_DEFAULT_USER_ID` env var directly as `perform_as` on all writes. Used by Sid in single-tenant mode and for cron jobs / internal callers.
+Local dev / cron / internal callers: server skips the broker, gates at the Cloud Run IAM layer (Google service-account auth), attaches `LEVER_DEFAULT_USER_ID` directly as `perform_as` on all writes.
 
 ---
 
@@ -87,8 +68,9 @@ When `OAUTH_ENABLED=false` OR when running locally without a configured Auth0 te
 | `src/additional-tools.ts` | 16+ tool registrations (post-M1: includes `lever_get_users`). | Use the `server.tool(name, schema, handler)` registration pattern. |
 | `src/interview-tools.ts` | 2 interview-specific tool registrations. | Same pattern as additional-tools.ts. |
 | `src/lever/client.ts` | LeverClient — REST wrapper, HTTP request layer, pagination, rate limiting via token bucket. | Single token bucket instance (shared across split files in v3 M3a). |
-| `src/auth/middleware.ts` | JWT validation + OAUTH_ENABLED toggle + Cloud Run IAM fallback. | Validates aud, iss, exp. JWKS fetched via cached `jose.createRemoteJWKSet` (5-min cooldown). |
-| `src/auth/metadata.ts` | OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728). | Returns `authorization_servers` field with Auth0 issuer URL. |
+| `src/auth/google-oauth-broker.ts` | (v3 M0b) Google OAuth broker implementing the SDK's `OAuthServerProvider` — `/authorize`, `/token`, `/register`, `/revoke`, `/oauth/google/callback`. Mints + validates opaque tokens ↔ email. | In-memory token/DCR store, per-instance. Enforce `hd == samba.tv` on the Google ID token. |
+| `src/auth/middleware.ts` | `OAUTH_ENABLED` toggle + Cloud Run IAM fallback; opaque-token validation via the broker. | Fallback path (`OAUTH_ENABLED=false`) attaches the env default only. |
+| `src/auth/metadata.ts` | OAuth 2.0 Protected Resource Metadata endpoint (RFC 9728). | `authorization_servers` points at this server's own `MCP_PUBLIC_URL`. |
 | `src/auth/perform-as-resolver.ts` | (v3 M3b) email → Lever user lookup with TTL cache (1h). | Fail loud on auth-enabled-but-unmatched. Fallback to env default ONLY when `OAUTH_ENABLED=false`. |
 | `src/lever/client-write.ts` | (v3 M3a/M3b) Write-request shim. Attaches resolved `perform_as` on every POST/PUT/DELETE. | All write tools MUST route through this. No direct `client.makeRequest("POST", ...)` outside this file. |
 
@@ -102,7 +84,8 @@ When `OAUTH_ENABLED=false` OR when running locally without a configured Auth0 te
   - `LEVER_API_KEY` — rotated post-refactor in M7.
   - `LEVER_DEFAULT_USER_ID` — fallback for non-authenticated paths only.
   - `OAUTH_ENABLED` = `true`.
-  - `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_ISSUER` — set in M0b after IT delivers prod Auth0 tenant.
+  - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` — self-serve Google OAuth Web client (docs/google-oauth-setup.md).
+  - `MCP_PUBLIC_URL`, `ALLOWED_HOSTED_DOMAIN=samba.tv`.
 - **Build:** Dockerfile + `cloudbuild.yaml`. Reconciled in v3 M2.6.
 
 ### MCP session state
@@ -139,23 +122,11 @@ When a Samba employee reports "MCP can't connect" or "401 from Lever MCP," walk 
 
 ### 1. Google account active?
 
-Confirm the user's `@samba.tv` Google account is active in Google Workspace admin console. If suspended or deleted, the Google Workspace Enterprise Connection rejects them at the IdP layer — Auth0 never even sees the login.
+Confirm the user's `@samba.tv` Google account is active in the Google Workspace admin console. If suspended or deleted, Google rejects the sign-in before the broker ever sees it.
 
-### 2. Auth0 rejected? Check Auth0 logs
+### 2. Rejected at the Google callback?
 
-Auth0 dashboard > Monitoring > Logs. Filter by `user_email` matching the failing user.
-
-**Common rejection reasons:**
-
-| Rejection | Diagnosis | Recovery |
-|---|---|---|
-| `Failed Silent Auth` for non-`@samba.tv` email | Defense-in-depth Post-Login Action triggered | User must use their `@samba.tv` Google account, not personal Google |
-| `Login required` with no Google Workspace error | Google Workspace connection misconfig | Verify enterprise connection status in Auth0 dashboard |
-| `Connection lapsed` | Auth0 / Google Workspace federation contract expired | Renew or refresh the connection in Auth0 |
-
-### 3. Auth0 succeeded, Lever MCP returned 401?
-
-Token validation failed server-side. Check Cloud Run logs:
+The broker logs every `/oauth/google/callback` outcome. Check Cloud Run logs:
 
 ```bash
 gcloud logging read 'resource.type="cloud_run_revision"
@@ -164,60 +135,47 @@ gcloud logging read 'resource.type="cloud_run_revision"
   --limit 50 --freshness 1h --format json
 ```
 
-Look for log entries from `auth/middleware.ts` indicating which claim failed:
-
-| Log message | Diagnosis | Recovery |
+| Log reason | Diagnosis | Recovery |
 |---|---|---|
-| `Invalid audience claim` | Auth0 API audience mismatch — token issued for wrong resource | Verify `AUTH0_AUDIENCE` env var matches the Auth0 API identifier exactly |
-| `Invalid issuer claim` | Auth0 issuer URL drift | Verify `AUTH0_ISSUER` env var matches `https://<tenant>.<region>.auth0.com/` (trailing slash matters) |
-| `Token expired` | Refresh token didn't rotate / Claude session stale | User re-authenticates (re-add MCP server in Claude Desktop) |
-| `JWKS fetch failed` | Auth0 network blip OR JWKS endpoint URL wrong | Check JWKS cooldown didn't get stuck on a stale 5xx; restart Cloud Run revision |
+| `hosted domain not allowed` (`hd != samba.tv`) | User signed in with a personal Google account | Use the `@samba.tv` account |
+| `invalid issuer` | ID token `iss` not `accounts.google.com` | Almost always a misrouted callback / wrong client; verify the OAuth client |
+| `upstream token exchange failed` | Wrong `GOOGLE_OAUTH_CLIENT_SECRET`, or redirect URI not authorized on the Google client | Verify secret + that the exact callback URL is an Authorized Redirect URI |
 
-### 4. Token validated, but tool returns "Your Lever account is not provisioned"
+### 3. Sign-in succeeded, but a later `/mcp` call returns 401
 
-The user's `@samba.tv` email is in Google Workspace + Auth0 + their Lever MCP token is valid, but `perform-as-resolver` returned null. This means they don't have a corresponding Lever user record.
+The opaque access token expired (1h TTL) or the Cloud Run instance scaled out / restarted and dropped the in-memory token. **Recovery:** user re-runs the connector sign-in (one click). If it recurs frequently, that's the signal to move token storage to Firestore/Redis.
 
-**Recovery:** Talent team provisions them in Lever admin. After provisioning, the resolver's 1-hour cache may still serve null — flush via:
+### 4. Token valid, but tool returns "Your Lever account is not provisioned"
 
-- Wait 1 hour for TTL expiry, OR
-- Restart the Cloud Run revision (clears in-memory cache), OR
-- Hit a future `/admin/cache/flush` endpoint (not yet implemented; tracked for v3 M5 observability scope)
+The user authenticated fine but `perform-as-resolver` found no matching Lever user. **Recovery:** Talent team provisions them in Lever admin. The resolver's 1h cache may still serve null — wait for TTL, restart the revision, or (future) hit `/admin/cache/flush`.
 
-### 5. Everything looks healthy but MCP client can't connect at all
+### 5. Everything looks healthy but the MCP client can't connect at all
 
-The MCP client's discovery flow may be broken. Test directly:
+Test the broker's discovery + DCR surface directly:
 
 ```bash
-# OAuth 2.0 Authorization Server metadata
-curl https://<auth0-domain>/.well-known/oauth-authorization-server
+BASE=https://lever-mcp-201626763325.us-central1.run.app
 
-# Expected: includes
-#   code_challenge_methods_supported: ["S256"]
-#   authorization_response_iss_parameter_supported: true
-#   registration_endpoint (for Dynamic Client Registration)
+# We ARE the authorization server — this must return our own endpoints:
+curl -s $BASE/.well-known/oauth-authorization-server | python3 -m json.tool
+#   expect issuer + /authorize + /token + /register + code_challenge_methods_supported: ["S256"]
 
-# OpenID Connect discovery
-curl https://<auth0-domain>/.well-known/openid-configuration
-
-# MCP server's Protected Resource Metadata
-curl https://lever-mcp-201626763325.us-central1.run.app/.well-known/oauth-protected-resource
-
-# Expected: authorization_servers field pointing at Auth0 issuer
+# Protected resource metadata (authorization_servers must point at OUR url):
+curl -s $BASE/.well-known/oauth-protected-resource | python3 -m json.tool
 ```
 
-If any of these endpoints return errors, the IT-side Auth0 setup is incomplete. See [system-design.md §4 Auth0 setup requirements](./system-design.md#auth-model) for the checklist.
+If `/.well-known/oauth-authorization-server` 404s, the broker isn't wired (M0b incomplete) or `GOOGLE_OAUTH_CLIENT_ID` is unset (broker self-disables). See [system-design.md §4](./system-design.md#auth-model) + [docs/google-oauth-setup.md](./docs/google-oauth-setup.md).
 
 ---
 
-## Three independent auth failure surfaces
+## Auth failure surfaces (broker model)
 
-Premortem Tiger #3 (system-design.md §10): the auth chain has THREE independent failure surfaces, each silently locking users out:
+Far smaller than the old Auth0 delegation path (one Google client we own, no tenant toggles):
 
-1. **Auth0 tenant misconfig.** Resource Parameter Compatibility Profile not enabled. `authorization_response_iss_parameter_supported: true` not set. Wrong API audience. PKCE method not S256. Recovery: Auth0 admin reviews tenant config against system-design.md §4 checklist.
-2. **Google Workspace connection drift.** Connection lapsed, domain restriction misconfigured, IdP federation cert expired. Recovery: Auth0 admin > Authentication > Enterprise Connections > Google Workspace, verify health.
-3. **Action rule misfire.** Post-Login Action returns error on a valid user (regex bug, claim missing). Recovery: Auth0 admin > Actions > Library, review Post-Login Action source code, check logs for action execution.
+1. **Google OAuth client misconfig.** Redirect URI not authorized, wrong client secret, or consent screen not Internal. Recovery: GCP Console → Credentials, verify against docs/google-oauth-setup.md.
+2. **`hd` drift.** `ALLOWED_HOSTED_DOMAIN` env not `samba.tv`, or the broker's `hd` check disabled. Recovery: confirm env + the callback validation path.
 
-**Smoke test on every M0b cutover MUST include a deliberate non-`@samba.tv` reject case** to verify all three surfaces are operating.
+**The M0b smoke test MUST include a deliberate non-`@samba.tv` reject case** to verify the domain gate fires.
 
 ---
 
@@ -237,7 +195,7 @@ gcloud run services update lever-mcp \
 - Schedule during low-use windows
 - After verification, invalidate the OLD key in Lever admin
 
-For v3 M7 (prod Auth0 cutover): same `gcloud run services update` command, replacing `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_ISSUER` env vars from dev → prod values in a single atomic update.
+Google OAuth client rotation (if the client secret is ever rotated): same atomic `gcloud run services update` swapping the `google-oauth-client-secret` secret reference.
 
 ---
 

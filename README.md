@@ -1,6 +1,6 @@
 # Lever MCP Server
 
-A remote [Model Context Protocol](https://modelcontextprotocol.io/) server exposing the Lever ATS API as tools callable from Claude. Built on **Express + GCP Cloud Run** with **OAuth 2.1 via Auth0** federating to Google Workspace SSO restricted to `@samba.tv`.
+A remote [Model Context Protocol](https://modelcontextprotocol.io/) server exposing the Lever ATS API as tools callable from Claude. Built on **Express + GCP Cloud Run**. v3 target auth: the server is its **own OAuth 2.1 Authorization Server** brokering **Google Workspace** sign-in restricted to `@samba.tv` (no Auth0 in the login path — mirrors the MSCI MCP).
 
 > **Canonical architecture spec:** [`system-design.md`](./system-design.md) (404 lines, 13 sections — current state, target architecture, multi-tenant auth model, MCP spec 2025-11-25 compliance, operational runbook, decision log).
 >
@@ -24,17 +24,16 @@ When a Samba employee asks Claude to "check the candidate status for X" or "subm
 
 ```
 Claude (MCP client)
-   │ OAuth 2.1 flow with PKCE + resource indicator (RFC 8707)
+   │ treats this server as the OAuth 2.1 AS; self-registers via DCR (/register),
+   │ runs PKCE S256 against our /authorize + /token
    ▼
-Auth0 (OAuth 2.1 Authorization Server)
-   │ + Google Workspace Enterprise Connection (domain-restricted to samba.tv)
-   │ + Post-Login Action (defense in depth: reject non-@samba.tv)
-   ▼ Bearer JWT (RS256, audience-bound to MCP server URL)
-Lever MCP Server (this repo, on GCP Cloud Run us-central1)
-   │ - Validates token via Auth0 JWKS (cached via jose.createRemoteJWKSet)
-   │ - Extracts email claim from token
-   │ - Resolves email → Lever user ID via perform-as-resolver (TTL cache) — **M3b, pending**
-   │ - Attaches resolved user ID as `perform_as` on writes
+Lever MCP Server (this repo, GCP Cloud Run us-central1) — acts as the AS
+   │ /authorize → redirects to Google (hd=samba.tv, prompt=select_account)
+   │ /oauth/google/callback → validates Google ID token (RS256, iss, hd==samba.tv),
+   │   mints an opaque Bearer token ↔ the user's email
+   │ every /mcp request: validate opaque token → resolve email
+   │ → resolve email → Lever user ID (perform-as-resolver, TTL cache) — **M3b, pending**
+   │ → attach resolved user ID as `perform_as` on writes
    ▼
 Lever ATS REST API (api.lever.co/v1)
 ```
@@ -51,7 +50,7 @@ Lever ATS REST API (api.lever.co/v1)
 | JWT validation | `jose` 6 |
 | Schema validation | `zod` 3 |
 | Deploy target | GCP Cloud Run, region `us-central1` |
-| Auth | OAuth 2.1 + Auth0 (Google Workspace IdP) |
+| Auth | OAuth 2.1 — self-hosted Google OAuth broker (Google Workspace IdP, `@samba.tv`) |
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for request-flow diagrams + auth-chain failure recovery procedures.
 
@@ -62,7 +61,7 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for request-flow diagrams + auth-chai
 - Node.js 20+ and npm
 - [GCP account](https://cloud.google.com/) with Cloud Run enabled (for deploy)
 - [Lever API key](https://hire.lever.co/settings/integrations) with scopes for: opportunities, postings, users, stages, archive_reasons, feedback_templates, requisitions, feedback (read + write), interviews (write), notes (write), webhooks (read + write)
-- [Auth0 tenant](https://auth0.com/) configured per [system-design.md §4 Auth0 setup requirements](./system-design.md#auth-model)
+- A Google OAuth 2.0 Web Client (for the auth broker) — self-serve setup in [`docs/google-oauth-setup.md`](./docs/google-oauth-setup.md)
 
 ---
 
@@ -106,7 +105,7 @@ export LEVER_DEFAULT_USER_ID=<your-lever-user-uuid>
 export NODE_ENV=development
 ```
 
-For the OAuth 2.1 path during local dev, also set `AUTH0_ISSUER_URL` and `AUTH0_AUDIENCE`. To bypass OAuth locally and use single-tenant fallback (server reads `LEVER_DEFAULT_USER_ID` for `perform_as`), set `OAUTH_ENABLED=false`.
+For the OAuth broker path during local dev, also set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `MCP_PUBLIC_URL`, and `ALLOWED_HOSTED_DOMAIN=samba.tv` (see [`docs/google-oauth-setup.md`](./docs/google-oauth-setup.md)). To bypass OAuth locally and use single-tenant fallback (server reads `LEVER_DEFAULT_USER_ID` for `perform_as`), set `OAUTH_ENABLED=false`.
 
 ---
 
@@ -132,7 +131,7 @@ gcloud run services update-traffic lever-mcp \
 
 ## Connect from Claude
 
-Once the server is deployed and the Auth0 tenant is configured, register the MCP server in Claude.ai (or Claude Code) using the standard remote MCP flow. Claude handles OAuth discovery + the PKCE auth code flow automatically. First connect prompts a Google login at `@samba.tv` and consents to the requested scopes; subsequent connects reuse the refresh token.
+Once the server is deployed and the Google OAuth client is configured, register the MCP server in Claude.ai (or Claude Code) using the standard remote MCP flow. Claude discovers this server as the OAuth AS, self-registers via DCR, and runs the PKCE auth code flow automatically. First connect prompts a Google login at `@samba.tv` and consents to the requested scopes.
 
 Local dev / debugging:
 
@@ -206,7 +205,7 @@ Reduces schema-token overhead ~30-40% vs the prior 26-tool registry (consolidate
 
 ### Out of scope (future batches)
 
-- M5 write tools (`lever_feedback(action="update")`) — blocked on Auth0 IT ticket for multi-tenant perform_as resolver
+- M5 write tools (`lever_feedback(action="update")`) — blocked on M3b multi-tenant perform_as resolver (fed by the Google OAuth broker; no IT dependency)
 - M6 webhook tools (`lever_list_webhooks`, `lever_register_webhook`, `lever_delete_webhook`) — same blocker
 
 ---
@@ -282,7 +281,7 @@ MIT (see [LICENSE](./LICENSE) if present).
 
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [Lever ATS Developer Documentation](https://hire.lever.co/developer/documentation)
-- [Auth0 Documentation](https://auth0.com/docs)
+- [Google Identity — OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect)
 - [GCP Cloud Run](https://cloud.google.com/run/docs)
 - [`system-design.md`](./system-design.md) — canonical v3 design
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — request-flow + failure recovery
