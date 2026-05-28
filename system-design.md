@@ -18,7 +18,7 @@ The Lever MCP Server is a remote Model Context Protocol (MCP) server that expose
 
 **Why it exists.** Samba's Talent Acquisition team uses Lever as the ATS. Common hiring-loop tasks — checking candidate status, reading interview feedback, finding postings by recruiter, submitting feedback — require either Lever UI clicks or scraping Lever notification emails. The MCP server lets Claude perform those tasks directly via the Lever REST API, with audit-trail attribution to the requesting user.
 
-**Where it sits in the stack.** Behind an OAuth 2.1 Authorization Server (Auth0, targeted v3) which federates to Google Workspace SSO restricted to `@samba.tv`. The server itself is an OAuth 2.1 Resource Server — it validates inbound bearer tokens, derives the calling user's identity from token claims, looks up their Lever user record, and attaches the resolved user ID as the `perform_as` parameter on outbound Lever API writes.
+**Where it sits in the stack.** The server is its **own** OAuth 2.1 Authorization Server (v3 target), brokering Google Workspace sign-in restricted to `@samba.tv` — no third-party AS in the login path. It validates each user's sign-in, derives their email, looks up their Lever user record, and attaches the resolved user ID as the `perform_as` parameter on outbound Lever API writes.
 
 ## 2. Current state (post-v1, pre-v3)
 
@@ -37,7 +37,7 @@ v1 shipped 2026-02-03 (commit `38e4768 feat(auth): Add OAuth 2.1 with Auth0 for 
 | Schema validation | `zod` 3.25 |
 | Deploy target | GCP Cloud Run, region `us-central1` |
 | Service URL | `https://lever-mcp-201626763325.us-central1.run.app/mcp` |
-| Auth (env-toggle) | OAuth 2.1 + Auth0; falls back to Cloud Run IAM when `OAUTH_ENABLED=false` |
+| Auth (env-toggle) | OAuth 2.1 — v3 target is the self-hosted Google OAuth broker; falls back to Cloud Run IAM when `OAUTH_ENABLED=false` |
 | Live tool count | 17 (see §8) |
 | LOC (live code) | ~4,325 across 7 source files |
 | LOC (dead code) | None — 1,322 LOC of unused `src/index.ts` removed in v3 M1 (commit `0c369eb`) |
@@ -149,24 +149,37 @@ OAuth 2.1 + Auth0 is wired into `src/auth/middleware.ts` but is env-toggle-able 
 
 This works for single-user (Sid) but does not scale to multi-user. Anyone who passes the Auth0 gate writes to Lever as Sid, breaking audit attribution.
 
-### v3 (target, multi-tenant)
+### v3 (target, multi-tenant) — Google OAuth broker
+
+The server acts as its **own** OAuth 2.1 Authorization Server, brokering Google Workspace sign-in directly. **No Auth0 in the login path.** This mirrors the MSCI MCP, which runs this exact pattern in production (`src/mcp_server/core/auth/oauth_broker.py` in that repo) — a proven design in Samba's environment.
 
 The auth chain:
 
 ```
-1. Claude.ai (MCP client)
-   └── Sends OAuth 2.1 authorization request to Auth0
-      (with PKCE S256, resource=https://lever-mcp-201626763325.us-central1.run.app)
+1. Claude (MCP client)
+   ├── Discovers this server IS the Authorization Server
+   │   (GET /.well-known/oauth-authorization-server → our URL)
+   ├── Self-registers via Dynamic Client Registration (POST /register)
+   └── Sends OAuth 2.1 + PKCE S256 authorization request to OUR /authorize
 
-2. Auth0
-   ├── Routes login to Google Workspace Enterprise Connection
-   │   (domain-restricted to samba.tv)
-   ├── Post-Login Action (defense in depth): reject if email NOT @samba.tv
-   └── Issues Bearer token (RS256), audience-bound to MCP server URL
+2. Lever MCP Server (acting as Authorization Server)
+   ├── /authorize → stashes the MCP request, redirects the user agent to Google
+   │   (accounts.google.com/o/oauth2/v2/auth, scope=openid email profile,
+   │    hd=samba.tv, prompt=select_account)
+   │
+   ├── /oauth/google/callback ← Google redirects back with a code
+   │   ├── Exchanges code → Google ID token (server-side, with client_secret)
+   │   ├── Validates ID token: RS256 sig via Google JWKS, iss ∈ accounts.google.com,
+   │   │   aud == our Google client_id, exp/iat present
+   │   ├── Enforces hd == samba.tv  (reject otherwise — domain gate)
+   │   ├── Extracts email claim
+   │   └── Mints an opaque MCP auth code ↔ email, redirects back to Claude
+   │
+   └── /token → exchanges the MCP code for an opaque Bearer access token (1h TTL)
+       mapped server-side to the validated email
 
-3. Lever MCP Server
-   ├── Validates token: signature via Auth0 JWKS, audience, issuer, expiry
-   ├── Extracts email claim
+3. Per /mcp request
+   ├── Validates the opaque Bearer token → resolves the user's email
    ├── Calls perform-as-resolver.resolve(email)
    │   ├── Cache hit (1h TTL) → return cached Lever user ID
    │   └── Cache miss → GET api.lever.co/v1/users?email={email}&perform_as=<bootstrap-id>
@@ -176,35 +189,31 @@ The auth chain:
    └── If OAUTH_ENABLED=false (cron jobs, internal callers): fall back to LEVER_DEFAULT_USER_ID
 ```
 
+Tokens and DCR registrations are held in-memory per Cloud Run instance (same as MSCI). A scale-out or restart drops active sessions; affected clients re-run the OAuth flow (one click in Claude). Acceptable for an internal team server; move to Firestore/Redis only if multi-instance session continuity becomes a hard requirement.
+
 **Critical invariant.** `LEVER_DEFAULT_USER_ID` is NEVER used as the fallback for authenticated requests. Authenticated-but-unmatched MUST fail loud. Otherwise, a new hire who hasn't been provisioned in Lever yet would have writes attributed to Sid — an attribution bug AND a compliance issue.
 
-### Auth0 setup requirements (the IT ticket)
+### Google OAuth client setup (self-serve — no IT ticket)
 
-Per MCP spec 2025-11-25, the Auth0 tenant needs:
+The only provisioning step is a **Google OAuth 2.0 Web Client**, created in the GCP project the service already runs in (`ai-workflows-459123`, owned by Sid). No Auth0, no IT dependency. See [`docs/google-oauth-setup.md`](./docs/google-oauth-setup.md) for the click-path.
 
 | Setting | Value |
 |---|---|
-| API Identifier (audience) | `https://lever-mcp-201626763325.us-central1.run.app` |
-| Signing algorithm | RS256 |
-| Token lifetime | 12 hours |
-| Application type | Regular Web Application, public client (PKCE required) |
-| Grant types | Authorization Code, Refresh Token |
-| PKCE method | S256 (mandatory) |
-| Dynamic Client Registration | **Enabled** (allows Claude.ai to self-register without manual setup) |
-| Google Workspace Enterprise Connection | **Sole IdP**, domain-restricted to samba.tv |
-| Database (username/password) connection | **Disabled** for this app |
-| Post-Login Action | Reject non-@samba.tv (defense in depth) |
-| Resource Parameter Compatibility Profile | **Enabled** (RFC 8707 — off by default in Auth0, required by MCP spec) |
-| `authorization_response_iss_parameter_supported` | **`true`** (RFC 9207 — set via Management API, off by default) |
-| Token claims | `email`, `email_verified`, `hd`, `name`, `sub` |
+| Credential type | OAuth 2.0 Client ID — **Web application** |
+| GCP project | `ai-workflows-459123` |
+| OAuth consent screen | **Internal** (auto-restricts to the samba.tv Workspace org) |
+| Authorized redirect URI | `https://lever-mcp-201626763325.us-central1.run.app/oauth/google/callback` |
+| Scopes requested | `openid email profile` |
+| Domain gate | `hd=samba.tv` on the auth request + `hd` claim check on the returned ID token (defense in depth) |
 
-The last two toggles (Resource Parameter Compatibility Profile and `iss` parameter support) are **off by default in Auth0** and will silently break Claude's MCP client if not enabled. They're called out explicitly in the IT ticket because the failure mode is non-obvious.
+The resulting **client_id** + **client_secret** go into GCP Secret Manager and are injected as `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`. The server also needs `MCP_PUBLIC_URL` (its own public origin) and `ALLOWED_HOSTED_DOMAIN=samba.tv`.
+
+Because the consent screen is Internal and the broker re-checks `hd`, only @samba.tv Google accounts can complete the flow. RFC 8707 / RFC 9207 tenant toggles are **not relevant** here — the server is its own AS and controls the protocol surface directly (this is precisely why the broker pattern avoids the Auth0 fragility).
 
 ### Auth alternatives evaluated and rejected
 
-- **Raw Google OAuth without Auth0** — Google's OAuth doesn't support RFC 8707 resource indicators or Dynamic Client Registration, both required by MCP spec for Claude's connector flow. Domain restriction via `hd` is supported but doesn't fill the other gaps.
-- **Identity-aware access proxies (pre-registration only)** — gateways that front the service with SSO can satisfy RFC 8707 and federate with Google, but those lacking Dynamic Client Registration (no `/register` endpoint) only work if the MCP client roster stabilizes to a known finite set. Rejected for the same DCR gap.
-- **Self-hosted OAuth 2.1 server** — federates to Google as the IdP, server issues its own audience-bound tokens. ~1-2 days of code; loses to Auth0 on operational complexity (you own OAuth security forever).
+- **Delegate directly to Auth0 (`auth.samba.tv`) as the AS** — the original v3 plan. Requires registering a Lever API + audience in the Auth0 tenant and flipping two off-by-default toggles (RFC 8707 Resource Parameter Profile, RFC 9207 `iss` param); Claude must DCR directly against Auth0. Fragile (silent failure if a toggle is wrong) and IT-gated. Rejected in favor of the Google broker after the MSCI MCP proved the broker pattern works with zero Auth0 in the login path. *(Auth0 remains the right tool for machine-to-machine calls to downstream Samba APIs — that is a separate concern from MCP user login.)*
+- **Identity-aware access proxies (pre-registration only)** — gateways lacking Dynamic Client Registration only work if the MCP client roster is a known finite set. Rejected for the DCR gap.
 
 ## 5. MCP protocol compliance
 
@@ -214,10 +223,10 @@ The last two toggles (Resource Parameter Compatibility Profile and `iss` paramet
 | MCP SDK | 1.25.0 | 1.29.x (minor bump, semver-safe) |
 | OAuth 2.0 Protected Resource Metadata (RFC 9728) | Implemented in `src/auth/metadata.ts` | Verified in v3 M1.5 audit |
 | Token audience binding (RFC 8707) | Validated in middleware | Re-verified for new resource URL |
-| PKCE S256 (hard MUST per 2025-11-25) | Enforced by Auth0 Application config | Re-verified in M0b smoke test |
-| `iss` parameter validation (RFC 9207) | Not enforced server-side | Added in v3 M3b |
+| PKCE S256 (hard MUST per 2025-11-25) | n/a (delegation path) | Enforced by our `/authorize` + token handler in the broker (M0b) |
+| `iss` parameter validation (RFC 9207) | Not enforced server-side | Server is its own AS — `iss` is our own `MCP_PUBLIC_URL`; validated in M0b |
 | WWW-Authenticate header on 401 with `resource_metadata` | Implemented | Re-verified |
-| Client ID Metadata Documents support | Not implemented | Evaluated in M1.5 — Auth0 supports DCR, may not need CIMD |
+| Client ID Metadata Documents support | Not implemented | Broker serves DCR (`/register`) directly — CIMD not needed |
 | Step-up authorization flow (insufficient_scope) | Not implemented | Out of scope for v3 unless usage demands it |
 
 The v1 → v3 protocol bump is a minor revision within the 2025 series; no breaking changes to the JSON-RPC envelope or core capability negotiation. The compliance audit (M1.5) walks through the deltas line by line, asserts conformance, then bumps the header.
@@ -257,7 +266,9 @@ Lever v1 rate-limits at ~10 req/sec per API key. The client implements a token b
   - `LEVER_API_KEY` (rotated post-refactor in M7)
   - `LEVER_DEFAULT_USER_ID` (fallback for non-authenticated paths only)
   - `OAUTH_ENABLED` = `true`
-  - `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_ISSUER` (set in M0b post-IT ticket)
+  - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` (from the self-serve Google OAuth Web client — secrets in Secret Manager)
+  - `MCP_PUBLIC_URL` = `https://lever-mcp-201626763325.us-central1.run.app` (token issuer + callback origin)
+  - `ALLOWED_HOSTED_DOMAIN` = `samba.tv`
 - **Build:** `Dockerfile` + `cloudbuild.yaml` both present today, partially redundant. Reconciled in v3 M2.6.
 
 ### MCP session state
@@ -306,22 +317,22 @@ Full vertical-slice breakdown lives in ATF-476's Stories. Summary:
 
 | Milestone | Goal | Effort |
 |---|---|---|
-| M0a | Pre-flight local — WIP triage, fixtures, log analysis, rollback tag, IT ticket filed | 1.5-2h |
-| M0b | Auth0 IT gate — tenant + API + Application + Google connection + DCR + RFC 8707 + RFC 9207 toggles + creds delivered | IT-side |
+| M0a | Pre-flight local — WIP triage, fixtures, log analysis, rollback tag | 1.5-2h |
+| M0b | Google OAuth broker port (self-AS, federate to Google, `hd=samba.tv`) — broker + verifier + `/oauth/google/callback` route + `mcpAuthRouter` wiring. Mirrors MSCI's `oauth_broker.py`. Self-serve Google OAuth client (no IT). | 4-6h |
 | M1 | Dead-code purge + SDK 1.25→1.29 + port `lever_get_users` WIP to live path | 1.5h |
 | M1.5 | MCP protocol 2025-06-18 → 2025-11-25 compliance audit | 2-3h |
 | M2 | Repo docs reality-check (README + CLAUDE.md + new ARCHITECTURE.md) | 1h |
 | M2.5 | GitHub Actions CI (type-check + test + lint) | 1h |
 | M2.6 | Deploy automation (reconcile Dockerfile + cloudbuild.yaml) | 1.5h |
 | M3a | File split — `tools/{...}.ts` + `lever/{client-pagination,client-ratelimit}.ts`, no auth wiring | 3-4h |
-| M3b | `perform_as` resolver + Auth0 wiring + multi-tenant edge cases + JWKS caching | 3-4h |
-| M4 | Test coverage for top-N tools + Auth0 verifier path tests | 5-7h |
+| M3b | `perform_as` resolver fed by the broker's validated email + multi-tenant edge cases | 3-4h |
+| M4 | Test coverage for top-N tools + broker/verifier path tests | 5-7h |
 | M5 | 5 feedback tools + observability (structured logging, latency histogram, error alerting) | 5-7h |
 | M6 | 3 webhook registration tools | 2-3h |
-| M7 | API key rotation + prod Auth0 cutover + chat-leaked key invalidated | 1h |
+| M7 | API key rotation + chat-leaked key invalidated | 1h |
 | M8 (optional) | Stage management + user tool polish | 2-3h |
 
-**Total: 27-34h focused / 1-4 weeks wall-clock** depending on IT lead time for M0b.
+**Total: ~28-36h focused.** No external IT lead time — M0b is self-serve (Google OAuth client in a project Sid owns), so wall-clock is bounded by build time, not a ticket queue.
 
 ## 10. Tigers (premortem risks + mitigations)
 
@@ -329,13 +340,13 @@ Full vertical-slice breakdown lives in ATF-476's Stories. Summary:
 
 2. **Protocol bump session re-handshake.** Live Claude.ai connector sessions handshake on 2025-06-18; bumping may force re-auth on all live sessions on first deploy. **Mitigation:** verify backward compatibility in M1.5; schedule deploy during low-use.
 
-3. **Three independent auth failure surfaces.** Auth0 tenant misconfig, Google connection drift, Action rule misfire each silently lock the user out. **Mitigation:** M0b smoke test includes deliberate non-@samba.tv reject case + documented recovery path in this doc.
+3. **Auth failure surfaces.** Google OAuth client misconfig (wrong redirect URI), consent-screen not Internal, or `hd` check drift each lock users out. **Mitigation:** M0b smoke test includes a deliberate non-@samba.tv reject case + documented recovery path in this doc. Failure surface is smaller than the Auth0 path (one Google client we own, no tenant toggles).
 
-4. **IT ticket SLA risk.** Samba IT historically 2-4 weeks on Auth0 provisioning. M0b stalls = M3b/M5/M6/M7 stall. **Mitigation:** file ticket Day 0; if SLA slips beyond 2 weeks, spin up a dev-only Auth0 tenant for parallel M3b development against a throwaway tenant. Swap to prod tenant at M7 cutover.
+4. **In-memory session loss on scale-out.** Broker holds tokens/DCR registrations per Cloud Run instance; a scale-out or restart drops sessions. **Mitigation:** acceptable for an internal team server (re-auth is one click); document the Firestore/Redis upgrade path if multi-instance continuity is later required. Same trade-off MSCI accepts.
 
 5. **Rate-limit state coordination post-file-split.** Each split file must share the singleton token bucket. **Mitigation:** `lever/client-ratelimit.ts` exports a module-level singleton; all split files import it.
 
-6. **JWKS cache strategy.** Hitting Auth0 JWKS per-request would rate-limit and add p95 latency. **Mitigation:** use `jose.createRemoteJWKSet` with cooldown.
+6. **JWKS cache strategy.** Hitting Google's JWKS (`https://www.googleapis.com/oauth2/v3/certs`) per callback would add latency. **Mitigation:** cache keys via `jose.createRemoteJWKSet` (or equivalent) with cooldown; ID-token validation happens only at `/oauth/google/callback`, not on every `/mcp` request (those use the opaque token).
 
 ## 11. Out of scope (named so they aren't forgotten)
 
@@ -372,9 +383,9 @@ gcloud run services update-traffic lever-mcp --to-revisions=<previous-revision>=
 If a Samba employee reports "MCP can't connect" or "401 from Lever MCP":
 
 1. Confirm their @samba.tv account is active in Google Workspace.
-2. Check Auth0 logs for the failing user — Application > Logs filter by email.
-3. If Auth0 rejected: domain mismatch (non-@samba.tv) or Post-Login Action triggered. Confirm with Auth0 admin.
-4. If Auth0 succeeded but Lever MCP returned 401: token validation failed server-side. Check Cloud Run logs for `aud`/`iss`/`exp` mismatch.
+2. Check Cloud Run logs for the broker's callback handler — filter by email.
+3. If the broker rejected at `/oauth/google/callback`: `hd` mismatch (non-@samba.tv) or Google ID-token validation failed. The log line names the reason.
+4. If sign-in succeeded but a tool returns 401: the opaque access token expired (1h TTL) or the instance scaled out and dropped it — have them re-run the connector sign-in (one click).
 5. If token valid but tool returns "your Lever account is not provisioned": their email is not registered in Lever. Talent team needs to provision them.
 
 ### Lever API key rotation
@@ -392,7 +403,8 @@ Atomic rolling deploy. Active MCP sessions reconnect transparently. Mid-flight t
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-05-22 | Refactor v3 scoped (ATF-476), not rebuild | SDK + OAuth wiring + 16 working tools are non-trivial; tech debt is mechanical, not architectural |
-| 2026-05-26 | Keep Auth0 as the OAuth 2.1 AS for v3 | MCP spec requires audience binding (RFC 8707) + Dynamic Client Registration; Google OAuth lacks both |
+| 2026-05-28 | **Auth: server-as-its-own-AS broker federating to Google directly** (supersedes the 2026-05-26 Auth0 decision) | The MSCI MCP proves this pattern in prod with zero Auth0 in the login path. Removes the IT dependency (Google OAuth client is self-serve in `ai-workflows-459123`, which Sid owns) and the fragile RFC 8707/9207 Auth0 tenant toggles that made the delegation path fail. Broker serves DCR + PKCE directly. |
+| 2026-05-26 | ~~Keep Auth0 as the OAuth 2.1 AS for v3~~ — **superseded 2026-05-28** | (Original rationale: MCP spec needs RFC 8707 + DCR, Google OAuth lacks both. Superseded: the broker supplies RFC 8707 + DCR itself, so Google-direct federation is sufficient.) |
 | 2026-05-26 | Multi-tenant `perform_as` via authenticated email → Lever user lookup | Single-user default attribution is a compliance bug; resolve identity from token claims |
 | 2026-05-26 | `LEVER_DEFAULT_USER_ID` is server-side fallback ONLY (not for authenticated paths) | Otherwise unmatched authenticated users get writes attributed to default — attribution + audit failure |
 | 2026-05-26 | Webhook ingestion sink stays out of scope; only registration tools ship in v3 | Sink requires a real consumer use case; registration is a 3-tool half-day add usable with any existing inbound URL |

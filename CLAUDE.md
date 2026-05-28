@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A remote MCP (Model Context Protocol) server that exposes the Lever ATS API as tools callable from Claude. Runs on **GCP Cloud Run** (us-central1) behind **OAuth 2.1 via Auth0** federating to Google Workspace SSO restricted to `@samba.tv`.
+A remote MCP (Model Context Protocol) server that exposes the Lever ATS API as tools callable from Claude. Runs on **GCP Cloud Run** (us-central1). v3 target auth: the server is its **own OAuth 2.1 Authorization Server** brokering **Google Workspace** sign-in restricted to `@samba.tv` (no Auth0 in the login path — mirrors the MSCI MCP). See system-design.md §4.
 
 **Canonical architecture spec:** [`system-design.md`](./system-design.md) — 13 sections covering current state, target architecture, multi-tenant auth model, MCP spec 2025-11-25 compliance, operational runbook, decision log. Read it first.
 
@@ -108,21 +108,23 @@ src/
 
 ```
 Claude (MCP client)
-  └─OAuth 2.1 flow→ Auth0 (AS)
-                      └─Google Workspace IdP (samba.tv-restricted)
-                          ↓ Bearer JWT (RS256, audience-bound)
-                       Lever MCP Server (this codebase, Cloud Run)
-                          - Validate JWT via Auth0 JWKS (cached)
-                          - Extract email claim
-                          - Resolve email → Lever user ID (perform_as)
-                          - Forward to Lever REST API
+  └─treats Lever MCP as the OAuth 2.1 AS; DCRs via /register
+       └─/authorize → Lever redirects to Google (hd=samba.tv)
+            └─Google → /oauth/google/callback
+                 - Validate Google ID token (RS256 via Google JWKS, iss, hd==samba.tv)
+                 - Mint opaque MCP token ↔ email
+       └─/token → opaque Bearer
+  every /mcp request:
+       - Validate opaque token → resolve email
+       - Resolve email → Lever user ID (perform_as)
+       - Forward to Lever REST API
 ```
 
-See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full diagram + auth-chain failure recovery procedures.
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full diagram + auth-chain failure recovery procedures. The broker pattern is ported from the MSCI MCP (`src/mcp_server/core/auth/oauth_broker.py`).
 
 ### Auth model (single-tenant today, multi-tenant in v3 M3b)
 
-- **`OAUTH_ENABLED=true`** (default in production): JWT validation via Auth0 JWKS. Server reads `email` claim and (in v3 M3b+) resolves to a Lever user ID for `perform_as`.
+- **`OAUTH_ENABLED=true`** (v3 target): the Google OAuth broker validates sign-in, reads the `email` claim, and (in v3 M3b+) resolves it to a Lever user ID for `perform_as`. No Auth0.
 - **`OAUTH_ENABLED=false`** (local dev, cron jobs, internal callers): Cloud Run IAM gating at infrastructure layer. Server attaches `LEVER_DEFAULT_USER_ID` as `perform_as` on writes.
 
 **Critical invariant (v3+):** `LEVER_DEFAULT_USER_ID` is NEVER used as a fallback for authenticated requests. Authenticated-but-unmatched MUST fail loud with "Your Lever account is not provisioned." Otherwise an unprovisioned user gets writes attributed to Sid (attribution + compliance bug).
@@ -247,7 +249,8 @@ Env vars are set via Cloud Run service config (NOT in `.env` files in production
 - `LEVER_API_KEY` — Lever admin > Integrations & API. Rotated in v3 M7.
 - `LEVER_DEFAULT_USER_ID` — Sid's Lever user UUID. Fallback only (see auth model above).
 - `OAUTH_ENABLED=true`
-- `AUTH0_ISSUER_URL`, `AUTH0_AUDIENCE` — set in v3 M0b after IT delivers the prod Auth0 tenant.
+- `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` — self-serve Google OAuth Web client (see [`docs/google-oauth-setup.md`](./docs/google-oauth-setup.md)).
+- `MCP_PUBLIC_URL` = the service's public URL; `ALLOWED_HOSTED_DOMAIN=samba.tv`.
 
 ### Rollback
 
@@ -269,14 +272,14 @@ The 14-milestone v3 refactor is tracked at [ATF-476](https://sambatv.atlassian.n
 | Milestone | Status | Story |
 |---|---|---|
 | M0a — Pre-flight | ✅ Complete | [ATF-477](https://sambatv.atlassian.net/browse/ATF-477) |
-| M0b — Auth0 IT gate | ⏳ Pending Samba IT | [ATF-478](https://sambatv.atlassian.net/browse/ATF-478) |
+| M0b — Google OAuth broker port (self-serve, no IT) | ⏳ Pending build | [ATF-478](https://sambatv.atlassian.net/browse/ATF-478) |
 | M1 — Dead code + SDK bump + lever_get_users | ✅ Complete | [ATF-479](https://sambatv.atlassian.net/browse/ATF-479) |
 | M1.5 — MCP protocol 2025-11-25 audit | ⏳ Pending | [ATF-480](https://sambatv.atlassian.net/browse/ATF-480) |
 | M2 — Docs reality-check | ✅ Complete | [ATF-481](https://sambatv.atlassian.net/browse/ATF-481) |
 | M2.5 — GitHub Actions CI | ✅ Complete (hard-gate type-check + test; lint/format soft until M3a) | [ATF-482](https://sambatv.atlassian.net/browse/ATF-482) |
 | M2.6 — Deploy automation | ⏳ Pending | [ATF-483](https://sambatv.atlassian.net/browse/ATF-483) |
 | M3a — File split | ⏳ Pending | [ATF-484](https://sambatv.atlassian.net/browse/ATF-484) |
-| M3b — perform_as resolver + Auth0 wiring | ⏳ Blocked on M0b | [ATF-485](https://sambatv.atlassian.net/browse/ATF-485) |
+| M3b — perform_as resolver (fed by broker email) | ⏳ Blocked on M0b | [ATF-485](https://sambatv.atlassian.net/browse/ATF-485) |
 | M4 — Test coverage | ⏳ Pending | [ATF-486](https://sambatv.atlassian.net/browse/ATF-486) |
 | M5 — 5 feedback tools | ⏳ Blocked on M3b | [ATF-487](https://sambatv.atlassian.net/browse/ATF-487) |
 | M6 — 3 webhook tools | ⏳ Blocked on M3b | [ATF-488](https://sambatv.atlassian.net/browse/ATF-488) |
