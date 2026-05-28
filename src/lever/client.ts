@@ -67,11 +67,13 @@ export class LeverClient {
 		body?: any,
 		retryCount: number = 0,
 	): Promise<T> {
-		// Queue requests to ensure rate limiting
-		this.requestQueue = this.requestQueue.then(async () => {
-			await this.rateLimit();
-
-			const url = new URL(`${this.baseUrl}${endpoint}`);
+		// Execute one HTTP attempt. Retries recurse on `attempt` (NOT back
+		// through the queue): the queue slot is already held for this logical
+		// request, so re-queuing would chain onto a still-pending promise and
+		// deadlock. Retry counts and backoff are unchanged from the original.
+		const attempt = async (attemptCount: number): Promise<T> => {
+			const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+			const url = new URL(`${this.baseUrl}${path}`);
 
 			if (params) {
 				Object.entries(params).forEach(([key, value]) => {
@@ -92,6 +94,11 @@ export class LeverClient {
 			console.log(`[API-TRACE ${traceId}] START ${method} ${endpoint}`);
 			const startTime = Date.now();
 
+			// Abort a hung connection so it cannot stall the serialized queue.
+			const controller = new AbortController();
+			const timeoutMs = 30_000;
+			const timer = setTimeout(() => controller.abort(), timeoutMs);
+
 			try {
 				const response = await fetch(url.toString(), {
 					method,
@@ -100,10 +107,11 @@ export class LeverClient {
 						"Content-Type": "application/json",
 					},
 					body: body ? JSON.stringify(body) : undefined,
+					signal: controller.signal,
 				});
 
 				const duration = Date.now() - startTime;
-				console.log(`[API-TRACE ${traceId}] Response: ${response.status} | Duration: ${duration}ms | Attempt: ${retryCount + 1}`);
+				console.log(`[API-TRACE ${traceId}] Response: ${response.status} | Duration: ${duration}ms | Attempt: ${attemptCount + 1}`);
 
 				if (!response.ok) {
 					const errorText = await response.text();
@@ -113,24 +121,24 @@ export class LeverClient {
 						const retryAfter = response.headers.get('Retry-After');
 						const waitTime = retryAfter 
 							? parseInt(retryAfter) * 1000 
-							: Math.min(2 ** retryCount * 1000, 30000); // Max 30s
+							: Math.min(2 ** attemptCount * 1000, 30000); // Max 30s
 						
 						console.error(`Rate limited (429). Waiting ${waitTime}ms before retry...`);
 						
-						if (retryCount < 3) {
+						if (attemptCount < 3) {
 							await new Promise(resolve => setTimeout(resolve, waitTime));
-							return this.makeRequest<T>(method, endpoint, params, body, retryCount + 1);
+							return attempt(attemptCount + 1);
 						}
 						
-						throw new Error(`Rate limit exceeded after ${retryCount} retries`);
+						throw new Error(`Rate limit exceeded after ${attemptCount} retries`);
 					}
 					
 					// Retry on server errors (5xx) but not client errors (4xx)
-					if (response.status >= 500 && retryCount < 2) {
-						console.error(`Lever API error ${response.status}, retrying... (attempt ${retryCount + 1}/3)`);
+					if (response.status >= 500 && attemptCount < 2) {
+						console.error(`Lever API error ${response.status}, retrying... (attempt ${attemptCount + 1}/3)`);
 						// Wait before retrying (exponential backoff)
-						await new Promise(resolve => setTimeout(resolve, 2 ** retryCount * 1000));
-						return this.makeRequest<T>(method, endpoint, params, body, retryCount + 1);
+						await new Promise(resolve => setTimeout(resolve, 2 ** attemptCount * 1000));
+						return attempt(attemptCount + 1);
 					}
 					
 					// Log 404 errors specifically
@@ -149,19 +157,40 @@ export class LeverClient {
 				}
 				
 				console.log(`[API-TRACE ${traceId}] SUCCESS | Total duration: ${Date.now() - startTime}ms`);
-				return responseData;
+				return responseData as T;
 			} catch (error) {
-				// Retry on network errors
-				if (retryCount < 2 && error instanceof TypeError && error.message.includes('fetch')) {
-					console.error(`Network error, retrying... (attempt ${retryCount + 1}/3)`);
-					await new Promise(resolve => setTimeout(resolve, 2 ** retryCount * 1000));
-					return this.makeRequest<T>(method, endpoint, params, body, retryCount + 1);
+				// Treat a timeout/abort as a retryable error.
+				const isAbort = (error as Error)?.name === "AbortError";
+				const isNetwork = error instanceof TypeError && error.message.includes('fetch');
+				if (attemptCount < 2 && (isNetwork || isAbort)) {
+					console.error(`${isAbort ? 'Request timed out' : 'Network error'}, retrying... (attempt ${attemptCount + 1}/3)`);
+					await new Promise(resolve => setTimeout(resolve, 2 ** attemptCount * 1000));
+					return attempt(attemptCount + 1);
+				}
+				if (isAbort) {
+					throw new Error(`Lever API request timed out after ${timeoutMs / 1000}s`);
 				}
 				throw error;
+			} finally {
+				clearTimeout(timer);
 			}
+		};
+
+		// Queue requests to ensure rate limiting. The chain-advancing promise
+		// (assigned to this.requestQueue) is decoupled from the result promise
+		// (returned to the caller). A rejection in the work body must NOT poison
+		// the queue: we swallow it ONLY for chain continuation, while the caller
+		// still observes the real resolve/reject via `run`.
+		const run = this.requestQueue.then(async () => {
+			await this.rateLimit();
+			return attempt(retryCount);
 		});
 
-		return this.requestQueue;
+		// Advance the chain regardless of outcome; swallow ONLY here so a
+		// rejection does not block later requests. The caller sees `run`.
+		this.requestQueue = run.catch(() => {});
+
+		return run as Promise<T>;
 	}
 
 	async getOpportunities(params: {
