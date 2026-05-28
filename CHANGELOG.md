@@ -17,11 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Consolidated the tool surface from 26 to 17 live tools via the action-enum pattern.
 - Replaced same-resource tool clusters with consolidated tools: `lever_notes` (3→1), `lever_feedback` (4→1), `lever_archive` (3→1), `lever_stages` (2→1), and `lever_requisitions` (2→1).
-- Completed Cloudflare Workers to GCP Cloud Run migration cleanup in docs and runtime assumptions.
+- Aligned documentation and runtime assumptions with the current Express + Cloud Run architecture.
 - Hardened production runtime with a singleton `LeverClient` instead of per-session clients.
 
 ### Removed
-- Removed remaining Cloudflare Workers-era artifacts: `wrangler.jsonc`, `mcp-tracing-guide.md`, `worker-configuration.d.ts`, `docs/cloudflare-traces.md`, and `docs/cloudflare_subrequest_limits.md`.
+- Purged unused dead code (`src/index.ts`) and stale tracing/config artifacts that were never imported by the live server.
 
 ### Fixed
 - Preserved audit attribution in current single-tenant mode by injecting `LEVER_DEFAULT_USER_ID` through Secret Manager.

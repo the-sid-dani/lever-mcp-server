@@ -84,7 +84,7 @@ When `OAUTH_ENABLED=false` OR when running locally without a configured Auth0 te
 |---|---|---|
 | `src/server.ts` | Cloud Run entry. Express setup. MCP transport wiring. Routes `/mcp`, `/health`, OAuth Protected Resource Metadata. | Transports map is per-container memory. Revision swap drops active sessions. |
 | `src/tools.ts` | `registerAllTools(server, client)`. Dispatches to additional + interview tool registrations. | Split into `src/tools/index.ts` + domain files in v3 M3a. |
-| `src/additional-tools.ts` | 16+ tool registrations (post-M1: includes `lever_get_users`). | Use `server.tool(name, schema, handler)` pattern (NOT the dead `this.server.tool` McpAgent pattern). |
+| `src/additional-tools.ts` | 16+ tool registrations (post-M1: includes `lever_get_users`). | Use the `server.tool(name, schema, handler)` registration pattern. |
 | `src/interview-tools.ts` | 2 interview-specific tool registrations. | Same pattern as additional-tools.ts. |
 | `src/lever/client.ts` | LeverClient — REST wrapper, HTTP request layer, pagination, rate limiting via token bucket. | Single token bucket instance (shared across split files in v3 M3a). |
 | `src/auth/middleware.ts` | JWT validation + OAUTH_ENABLED toggle + Cloud Run IAM fallback. | Validates aud, iss, exp. JWKS fetched via cached `jose.createRemoteJWKSet` (5-min cooldown). |

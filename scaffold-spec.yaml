@@ -25,7 +25,6 @@ out_of_scope:
   - "MCP session persistence across Cloud Run revision swaps — move to Redis/Firestore only if multi-user use grows real"
   - "Repo migration from personal github.com/the-sid-dani to Samba org — separate housekeeping project"
   - "Observability beyond M5's structured-logging baseline (Cloud Monitoring dashboard, SLO alerting, p95 tracking) — separate future project"
-  - "Cloudflare Access for SaaS as Auth0 alternative — evaluated, rejected for v3 due to Dynamic Client Registration gap; revisit later"
 
 # ===== Repo + deployment =====
 
@@ -110,7 +109,7 @@ slices:
     summary: "[Lever-MCP] Slice C (M1): Dead-code purge + MCP SDK 1.25→1.29 + port lever_get_users WIP to live path"
     sd_sections: ["2 current state", "3 source tree v1→v3", "8 v3 additions"]
     what_to_build:
-      - "Delete `src/index.ts` (1,322 LOC of Cloudflare Workers McpAgent code, never imported by live code). Verify zero imports first: `grep -rn \"from.*['\\\"]./index['\\\"]\" src/` returns nothing."
+      - "Delete `src/index.ts` (1,322 LOC of unused code, never imported by the live server). Verify zero imports first: `grep -rn \"from.*['\\\"]./index['\\\"]\" src/` returns nothing."
       - "Before deletion, **port the `lever_get_users` tool registration** from `src/index.ts:953-1015` to `src/additional-tools.ts` (or its v3 home in `tools/reference.ts` if M3a runs first). The underlying client methods `getUsers()` + `getUser()` already exist in WIP in `src/lever/client.ts` (working code, commit as part of this slice)."
       - "Bump `@modelcontextprotocol/sdk` from `^1.25.0` to `^1.29.0` in `package.json`. Run `npm install && npm run type-check`. Same major version — no breaking changes expected."
       - "Commit the opportunity owner-name expansion (from WIP) — `expand=[\"owner\"]` on getOpportunities + getOpportunity calls, with formatter changes in `additional-tools.ts`."
@@ -149,12 +148,12 @@ slices:
     summary: "[Lever-MCP] Slice E (M2): Repo docs reality-check (README + CLAUDE.md + ARCHITECTURE.md)"
     sd_sections: ["2 current state", "3 architecture"]
     what_to_build:
-      - "Rewrite `README.md` to describe the actual architecture (Express + Cloud Run + Streamable HTTP + OAuth 2.1 via Auth0), not the stale Cloudflare Workers description from the v1 era. Reference `system-design.md` as the canonical architecture spec."
+      - "Rewrite `README.md` to describe the actual architecture (Express + Cloud Run + Streamable HTTP + OAuth 2.1 via Auth0). Reference `system-design.md` as the canonical architecture spec."
       - "Rewrite `CLAUDE.md` (in-repo) to match. Add a 'Live tool inventory' table."
       - "Create `ARCHITECTURE.md` with the request-flow diagram (ASCII or mermaid) + auth-chain failure recovery doc from `system-design.md` §12 operational runbook."
       - "Reconcile `Dockerfile` vs `cloudbuild.yaml` — document which one is the live build path; remove or annotate the other if both stay."
     ac_items:
-      - "README.md no longer mentions Cloudflare Workers / Durable Objects / wrangler / SSE"
+      - "README.md accurately describes the Express + Cloud Run + Auth0 architecture"
       - "CLAUDE.md (repo) updated, references system-design.md"
       - "ARCHITECTURE.md created with request-flow diagram + failure recovery section"
       - "Dockerfile + cloudbuild.yaml roles documented or one removed"
