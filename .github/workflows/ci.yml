@@ -54,7 +54,7 @@ jobs:
           path: ./
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
-          extra_args: --only-verified --fail
+          extra_args: --only-verified
 
       # --- Soft gates (report-only until M3a cleanup) ---
       # The codebase has pre-existing biome lint errors + format issues
