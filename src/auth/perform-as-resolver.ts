@@ -56,8 +56,9 @@ export class PerformAsResolver {
       });
 
       for (const user of page.data) {
-        if (user.email && user.id) {
-          next.set(user.email.toLowerCase(), user.id);
+        const email = (user.email ?? "").trim().toLowerCase();
+        if (email && user.id) {
+          next.set(email, user.id);
         }
       }
 

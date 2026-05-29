@@ -31,6 +31,32 @@ describe('PerformAsResolver', () => {
     await expect(resolver.resolve('sid@samba.tv')).resolves.toBe('u1');
   });
 
+  it('resolves a stored email with surrounding whitespace by its clean address', async () => {
+    const getUsers = vi.fn().mockResolvedValue({
+      data: [
+        { id: 'u1', email: '  Sid@Samba.tv  ' },
+        { id: 'u2', email: 'jo@samba.tv' },
+      ],
+      hasNext: false,
+    } as UsersPage);
+
+    const resolver = new PerformAsResolver(makeClient(getUsers));
+    await expect(resolver.resolve('sid@samba.tv')).resolves.toBe('u1');
+  });
+
+  it('skips a user record with no email and still resolves other valid users', async () => {
+    const getUsers = vi.fn().mockResolvedValue({
+      data: [
+        { id: 'u1', email: undefined },
+        { id: 'u2', email: 'jo@samba.tv' },
+      ],
+      hasNext: false,
+    } as unknown as UsersPage);
+
+    const resolver = new PerformAsResolver(makeClient(getUsers));
+    await expect(resolver.resolve('jo@samba.tv')).resolves.toBe('u2');
+  });
+
   it('throws PerformAsUnresolvedError for an unknown email', async () => {
     const getUsers = vi.fn().mockResolvedValue({
       data: [{ id: 'u1', email: 'sid@samba.tv' }],

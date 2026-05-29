@@ -55,6 +55,16 @@ describe("resolvePerformAs auth policy", () => {
     ).rejects.toBeInstanceOf(PerformAsUnresolvedError);
   });
 
+  it("OAUTH enabled + explicitOverride for an unprovisioned email -> still rejects (override ignored, no spoof)", async () => {
+    enableOAuth();
+    const { resolver } = makeResolver();
+    await expect(
+      runWithRequestContext({ email: "ghost@samba.tv" }, () =>
+        resolvePerformAs(resolver, "attacker-user-id"),
+      ),
+    ).rejects.toBeInstanceOf(PerformAsUnresolvedError);
+  });
+
   it("OAUTH enabled + NO context email -> rejects (fail loud, never fall back)", async () => {
     enableOAuth();
     const { resolver } = makeResolver();
