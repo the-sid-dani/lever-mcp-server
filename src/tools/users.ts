@@ -1,38 +1,26 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "../lever/client.js";
+import { collectAllPages } from "../utils/paginate.js";
 
 export function registerUserTools(server: McpServer, client: LeverClient) {
 	// Get Lever users (recruiters, hiring managers, etc.) — ported from dead index.ts 2026-05-26
 	server.tool(
 		"lever_get_users",
+		"List Lever users (recruiters, hiring managers, interviewers) with their names, emails, and IDs; paginates the full directory.",
 		{
 			limit: z.number().default(100).describe("Maximum number of users to return (max 100)"),
 			include_deactivated: z.boolean().default(false).describe("Include deactivated users"),
 		},
 		async (args) => {
 			try {
-				const allUsers: any[] = [];
-				let offset: string | undefined;
-				let batchesFetched = 0;
-				const maxBatches = 5;
-
-				while (batchesFetched < maxBatches) {
-					const response = await client.getUsers({
+				const { items: allUsers } = await collectAllPages((offset) =>
+					client.getUsers({
 						limit: 100,
 						offset,
 						includeDeactivated: args.include_deactivated,
-					});
-
-					if (response.data && response.data.length > 0) {
-						allUsers.push(...response.data);
-					}
-
-					batchesFetched++;
-
-					if (!response.hasNext || !response.next) break;
-					offset = response.next;
-				}
+					}),
+				);
 
 				return {
 					content: [

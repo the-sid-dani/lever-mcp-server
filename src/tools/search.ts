@@ -9,6 +9,7 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 	// Basic search tool
 	server.tool(
 		"lever_search_candidates",
+		"Search candidates by name or email; an email query is an exact server-side match (fast, one call), while a name query scans the full candidate base client-side (Lever has no server-side name filter) so it is complete but slower; check the response coverage object.",
 		{
 			query: z.string().optional().describe("Search query for name or email"),
 			stage_name: z.string().optional().describe("Stage name (not ID)"),
@@ -69,18 +70,19 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 						],
 					};
 				} else if (args.query) {
-					// For name searches, fetch and filter locally
+					// For name searches, fetch and filter locally.
+					// VAL-102: sweep the FULL base to hasNext:false (no maxPages /
+					// maxFetch caps) so no candidate is silently dropped. The client
+					// token bucket serializes requests + handles 429 backoff, so
+					// sequential awaits here are correct (no added delay/concurrency).
 					const allOpportunities: LeverOpportunity[] = [];
 					let offset: string | undefined;
-					let pagesChecked = 0;
-					const maxPages = 5; // Increased to check more candidates
+					let pagesScanned = 0;
+					let recordsScanned = 0;
+					let sawLastPage = false;
 					const queryLower = args.query.toLowerCase();
-					const maxFetch = args.limit * 5; // Fetch more to ensure we have enough for pagination
 
-					while (
-						pagesChecked < maxPages &&
-						allOpportunities.length < maxFetch
-					) {
+					while (true) {
 						const response = await client.getOpportunities({
 							stage_id: stageId,
 							posting_id: args.posting_id,
@@ -92,14 +94,24 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 
 						// Filter candidates by name
 						for (const c of response.data) {
+							recordsScanned++;
 							const name = (c.name || "").toLowerCase();
 							if (queryLower && name.includes(queryLower)) {
 								allOpportunities.push(c);
 							}
 						}
 
-						pagesChecked++;
-						if (!response.hasNext || !response.next) break;
+						pagesScanned++;
+						// VAL-504: API-terminal page reached -- the sweep is honest.
+						if (!response.hasNext || !response.next) {
+							sawLastPage = true;
+							break;
+						}
+
+						// VAL-504: non-advancing cursor guard. A stuck cursor would
+						// otherwise loop forever; break defensively (sawLastPage stays
+						// false -- the sweep may be partial, so coverage is not complete).
+						if (response.next === offset) break;
 
 						// Use the next token from the API response
 						offset = response.next;
@@ -125,13 +137,15 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 						next_page: hasMore ? page + 1 : null,
 						query: args.query,
 						candidates: paginatedCandidates.map(formatOpportunity),
+						// VAL-504: coverage is DERIVED -- complete only if the sweep
+						// reached the API's last page (hasNext:false). A defensive
+						// stuck-cursor break leaves this false (honest, possibly partial).
+						coverage: {
+							records_scanned: recordsScanned,
+							pages_scanned: pagesScanned,
+							complete: sawLastPage,
+						},
 					};
-
-					// Add warning if we hit the limit
-					if (pagesChecked >= maxPages && hasMore) {
-						result.warning = `Search limited to first ${pagesChecked * 100} candidates. More results may exist.`;
-						result.total_scanned = pagesChecked * 100;
-					}
 
 					return {
 						content: [

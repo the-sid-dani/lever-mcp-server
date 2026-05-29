@@ -1,11 +1,14 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "../lever/client.js";
+import { getSharedResolver, resolvePerformAs } from "../auth/resolve-perform-as.js";
+import { collectAllPages } from "../utils/paginate.js";
 
 export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// List files for a candidate
 	server.tool(
 		"lever_list_files",
+		"List all files and resumes attached to a candidate, with filename, type, size, and download URL.",
 		{
 			opportunity_id: z.string(),
 		},
@@ -91,6 +94,7 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// List applications for a candidate
 	server.tool(
 		"lever_list_applications",
+		"List the job applications tied to a candidate, including posting, status, and creation date.",
 		{
 			opportunity_id: z.string(),
 		},
@@ -150,6 +154,7 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// Consolidated update tool for stage, owner, and tags
 	server.tool(
 		"lever_update_candidate",
+		"Update a candidate: move stage (by ID or name), add or remove tags; owner reassignment is not yet implemented.",
 		{
 			opportunity_id: z.string().describe("The candidate's opportunity ID"),
 			stage_id: z.string().optional().describe("Move to this stage ID"),
@@ -175,11 +180,18 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 					}
 				}
 
+				// Resolve perform_as ONLY if there is a write to perform (avoid throwing
+				// on a no-op call). Every write below must attach perform_as or Lever 400s.
+				const hasWrite = !!(args.stage_id || args.add_tags?.length || args.remove_tags?.length);
+				const performAs = hasWrite
+					? await resolvePerformAs(getSharedResolver(client))
+					: undefined;
+
 				// Perform updates
 				const results = [];
 
 				if (args.stage_id) {
-					await client.updateOpportunityStage(args.opportunity_id, args.stage_id);
+					await client.updateOpportunityStage(args.opportunity_id, args.stage_id, performAs);
 					results.push({ action: "stage_updated", stage_id: args.stage_id });
 				}
 
@@ -192,10 +204,10 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 				if (args.add_tags || args.remove_tags) {
 					// Handle tag updates
 					if (args.add_tags && args.add_tags.length > 0) {
-						await client.addCandidateTags(args.opportunity_id, args.add_tags);
+						await client.addCandidateTags(args.opportunity_id, args.add_tags, performAs);
 					}
 					if (args.remove_tags && args.remove_tags.length > 0) {
-						await client.removeCandidateTags(args.opportunity_id, args.remove_tags);
+						await client.removeCandidateTags(args.opportunity_id, args.remove_tags, performAs);
 					}
 					results.push({
 						action: "tags_updated",
@@ -239,32 +251,19 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// lever_list_emails — VAL-019 (M1.7) — read email thread history for a candidate
 	server.tool(
 		"lever_list_emails",
+		"List the email thread history logged on a candidate, including subject, participants, body, and timestamps.",
 		{
 			opportunity_id: z.string().describe("Opportunity ID to list emails for"),
 			limit: z.number().default(100).describe("Max emails per request (Lever max 100)"),
 		},
 		async (args) => {
 			try {
-				const allEmails: any[] = [];
-				let offset: string | undefined;
-				let batchesFetched = 0;
-				const maxBatches = 5;
-
-				while (batchesFetched < maxBatches) {
-					const response = await client.getEmails(args.opportunity_id, {
+				const { items: allEmails } = await collectAllPages((offset) =>
+					client.getEmails(args.opportunity_id, {
 						limit: args.limit,
 						offset,
-					});
-
-					if (response.data && response.data.length > 0) {
-						allEmails.push(...response.data);
-					}
-
-					batchesFetched++;
-
-					if (!response.hasNext || !response.next) break;
-					offset = response.next;
-				}
+					}),
+				);
 
 				return {
 					content: [

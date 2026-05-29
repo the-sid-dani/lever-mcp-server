@@ -13,6 +13,7 @@ import { registerAdditionalTools } from "./additional-tools.js";
 import { registerInterviewTools } from "./interview-tools.js";
 import { formatOpportunity, formatPosting } from "./tools/formatters.js";
 import { resolveStageIdentifier } from "./utils/stage-helpers.js";
+import { collectAllPages } from "./utils/paginate.js";
 
 // MCP Tool Response type - needs index signature for SDK compatibility
 interface McpToolResponse {
@@ -73,10 +74,10 @@ export function registerAllTools(server: McpServer, apiKey: string): void {
 /**
  * Register search-related tools
  */
-function registerSearchTools(server: McpServer, client: LeverClient): void {
+export function registerSearchTools(server: McpServer, client: LeverClient): void {
 	server.tool(
 		"lever_advanced_search",
-		"Search for candidates with advanced filters including company, skills, location, stage, and tags",
+		"Filter candidates by company, skills, location, stage, or tags; pass email for an exact server-side match, otherwise it scans the full base client-side (slower) and reports a coverage object.",
 		{
 			companies: z.string().optional().describe("Comma-separated company names"),
 			skills: z.string().optional().describe("Comma-separated skills to search for"),
@@ -125,12 +126,18 @@ function registerSearchTools(server: McpServer, client: LeverClient): void {
 					}
 				}
 
+				// VAL-103: sweep the FULL base to hasNext:false (no maxFetch ceiling)
+				// so no candidate is silently dropped. The client token bucket
+				// serializes requests + handles 429 backoff, so sequential awaits
+				// here are correct (no added delay/concurrency).
 				const allCandidates: LeverOpportunity[] = [];
 				let offset: string | undefined;
-				const maxFetch = params.mode === "quick" ? Math.min(params.limit * 3, 500) : Math.min(params.limit * 10, 5000);
+				let pagesScanned = 0;
+				let recordsScanned = 0;
+				let sawLastPage = false;
 
-				// Fetch candidates with pagination
-				while (allCandidates.length < maxFetch) {
+				// Fetch candidates until the API reports no further pages.
+				while (true) {
 					const searchParams: Record<string, unknown> = {
 						limit: 100,
 						offset,
@@ -145,6 +152,9 @@ function registerSearchTools(server: McpServer, client: LeverClient): void {
 					const response = await client.getOpportunities(searchParams as Parameters<typeof client.getOpportunities>[0]);
 
 					if (!response?.data?.length) break;
+
+					pagesScanned++;
+					recordsScanned += response.data.length;
 
 					// Filter candidates
 					const filtered = response.data.filter((c: LeverOpportunity) => {
@@ -168,7 +178,16 @@ function registerSearchTools(server: McpServer, client: LeverClient): void {
 
 					allCandidates.push(...filtered);
 
-					if (!response.hasNext || !response.next) break;
+					// VAL-504: API-terminal page reached -- the sweep is honest.
+					if (!response.hasNext || !response.next) {
+						sawLastPage = true;
+						break;
+					}
+
+					// VAL-504: non-advancing cursor guard. A stuck cursor would
+					// otherwise loop forever; break defensively (sawLastPage stays
+					// false -- the sweep may be partial, so coverage is not complete).
+					if (response.next === offset) break;
 					offset = response.next;
 				}
 
@@ -186,6 +205,14 @@ function registerSearchTools(server: McpServer, client: LeverClient): void {
 							page: params.page,
 							limit: params.limit,
 							results: pageResults.map(formatOpportunity),
+							// VAL-504: coverage is DERIVED -- complete only if the sweep
+							// reached the API's last page (hasNext:false). A defensive
+							// stuck-cursor break leaves this false (honest, possibly partial).
+							coverage: {
+								records_scanned: recordsScanned,
+								pages_scanned: pagesScanned,
+								complete: sawLastPage,
+							},
 						}, null, 2),
 					}],
 				};
@@ -208,7 +235,7 @@ function registerSearchTools(server: McpServer, client: LeverClient): void {
 function registerCandidateTools(server: McpServer, client: LeverClient): void {
 	server.tool(
 		"lever_get_candidate",
-		"Get detailed information about a specific candidate",
+		"Fetch full details for one candidate by their opportunity ID.",
 		{
 			opportunity_id: z.string().describe("The opportunity/candidate ID"),
 		},
@@ -253,7 +280,7 @@ function registerCandidateTools(server: McpServer, client: LeverClient): void {
 function registerUtilityTools(server: McpServer, client: LeverClient): void {
 	server.tool(
 		"lever_list_open_roles",
-		"List all open job postings",
+		"List every published (open) job posting, optionally expanded with owner and hiring-manager details.",
 		{
 			expand_owners: z.boolean().default(true).describe("Include posting owner and hiring manager details"),
 		},
@@ -262,16 +289,22 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 
 			try {
 				const expandFields = params.expand_owners ? ["owner", "hiringManager"] : [];
-				const response = await client.getPostings("published", 50, undefined, expandFields);
+
+				// VAL-103: paginate ALL published postings (no single-fetch cap)
+				// so no open role is silently dropped. Sequential awaits are
+				// correct -- the client token bucket handles rate limiting + 429s.
+				const { items: allRoles } = await collectAllPages<LeverPosting>(
+					(offset) => client.getPostings("published", 100, offset, expandFields),
+				);
 
 				return {
 					content: [{
 						type: "text",
 						text: JSON.stringify({
-							count: response.data.length,
-							hasMore: response.hasNext || false,
+							count: allRoles.length,
+							hasMore: false,
 							includes_owner_data: params.expand_owners,
-							roles: response.data.map(formatPosting),
+							roles: allRoles.map(formatPosting),
 						}, null, 2),
 					}],
 				};
@@ -288,7 +321,7 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 
 	server.tool(
 		"lever_find_postings_by_owner",
-		"Find job postings by owner name or ID",
+		"Find job postings owned by a given user, looked up by owner name (partial match) or owner ID.",
 		{
 			owner_name: z.string().optional().describe("Name of the posting owner (partial match)"),
 			owner_id: z.string().optional().describe("Owner ID"),
@@ -314,8 +347,14 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 					const response = await client.getPostingsByOwner(params.owner_name, params.state);
 					postings = response.data;
 				} else {
-					const response = await client.getPostings(params.state, params.limit, undefined, ["owner"]);
-					postings = response.data.filter((p: LeverPosting) => {
+					// VAL-103: paginate ALL postings (no single-fetch cap) then
+					// filter by owner id, just like the owner_name path. Returns
+					// every match -- no slice truncation.
+					const { items: allPostings } = await collectAllPages<LeverPosting>(
+						(offset) => client.getPostings(params.state, 100, offset, ["owner"]),
+					);
+
+					postings = allPostings.filter((p: LeverPosting) => {
 						const ownerId = typeof p.owner === "object" ? p.owner?.id : p.owner;
 						return ownerId === params.owner_id;
 					});
@@ -326,7 +365,7 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 						type: "text",
 						text: JSON.stringify({
 							count: postings.length,
-							postings: postings.slice(0, params.limit).map(formatPosting),
+							postings: postings.map(formatPosting),
 						}, null, 2),
 					}],
 				};

@@ -17,6 +17,7 @@ import type {
 } from "../types/lever.js";
 import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger.js";
+import { collectAllPages } from "../utils/paginate.js";
 
 // Simple token bucket implementation for rate limiting
 class TokenBucket {
@@ -435,31 +436,15 @@ export class LeverClient {
 
 	// Add method to find postings by owner name
 	async getPostingsByOwner(ownerName: string, state: string = "published"): Promise<LeverApiResponse<LeverPosting>> {
-		// Fetch more postings to ensure we don't miss any (but not ALL)
-		const allPostings: LeverPosting[] = [];
-		let offset: string | undefined;
-		let batchesFetched = 0;
-		const maxBatches = 5; // Fetch up to 500 postings (5 batches of 100)
-		
-		// Fetch multiple batches to increase coverage
-		while (batchesFetched < maxBatches) {
-			const response = await this.getPostings(state, 100, offset, ["owner", "hiringManager"]);
-			
-			if (response.data && response.data.length > 0) {
-				allPostings.push(...response.data);
-			}
-			
-			batchesFetched++;
-			
-			// Stop if no more data
-			if (!response.hasNext || !response.next) {
-				break;
-			}
-			
-			offset = response.next;
-		}
-		
-		logger.debug(`getPostingsByOwner: Fetched ${allPostings.length} postings in ${batchesFetched} batches for owner search: ${ownerName}`);
+		// VAL-103: paginate ALL postings (no self-imposed batch cap) so no role
+		// is silently dropped. The client token bucket serializes requests +
+		// handles 429 backoff, so sequential awaits here are correct.
+		// VAL-503: cursor-safe via collectAllPages (stuck-cursor + empty-page guards).
+		const { items: allPostings } = await collectAllPages((offset) =>
+			this.getPostings(state, 100, offset, ["owner", "hiringManager"]),
+		);
+
+		logger.debug(`getPostingsByOwner: Fetched ${allPostings.length} postings for owner search: ${ownerName}`);
 		
 		// Filter by owner name (case-insensitive partial match)
 		const filteredPostings = allPostings.filter(posting => {
@@ -516,7 +501,8 @@ export class LeverClient {
 		}
 
 		// Expand user objects for better data
-		queryParams.expand = ["owner", "posting"];
+		// "posting" is not an expandable field on /opportunities (Lever 400s); only owner is valid.
+		queryParams.expand = ["owner"];
 
 		return this.makeRequest("GET", "/opportunities", queryParams);
 	}

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "../lever/client.js";
+import { collectAllPages } from "../utils/paginate.js";
 
 export function registerRequisitionTools(server: McpServer, client: LeverClient) {
 	// lever_requisitions — consolidated (replaces lever_list_requisitions + lever_get_requisition_details)
@@ -39,9 +40,11 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 						if (args.created_at_end) params.created_at_end = args.created_at_end;
 						if (args.offset) params.offset = args.offset;
 
-						// Get requisitions from API
-						const response = await client.getRequisitions(params);
-						const requisitions = response.data || [];
+						// Get requisitions from API -- cursor-safe pagination (VAL-105/VAL-503)
+						const { items: allReqs } = await collectAllPages((offset) =>
+							client.getRequisitions({ ...params, offset: offset ?? args.offset }),
+						);
+						const requisitions = allReqs;
 
 						// Format the results to clearly show ID vs Code distinction
 						const formattedResults = requisitions.map((req: any) => ({

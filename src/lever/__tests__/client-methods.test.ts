@@ -297,3 +297,79 @@ describe('LeverClient error path', () => {
 		expect(message).not.toContain('SECRET_PII_LEAK_BODY');
 	});
 });
+
+describe('LeverClient getPostingsByOwner pagination (VAL-103)', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('paginates ALL pages (no maxBatches cap) until hasNext is false', async () => {
+		const client = new LeverClient('test-key');
+
+		// Spy on the instance method getPostings to drive pagination without network.
+		const getPostingsSpy = vi
+			.spyOn(client, 'getPostings')
+			.mockResolvedValueOnce({
+				data: [{ id: 'p1', owner: { name: 'Sid Dani' } }],
+				hasNext: true,
+				next: 'o2',
+			} as any)
+			.mockResolvedValueOnce({
+				data: [{ id: 'p2', owner: { name: 'Sid Dani' } }],
+				hasNext: false,
+			} as any);
+
+		const res = await client.getPostingsByOwner('Sid');
+
+		// Two pages fetched proves the 5-batch (500-posting) cap is gone.
+		expect(getPostingsSpy).toHaveBeenCalledTimes(2);
+		expect(res.data.length).toBe(2);
+		expect(res.data[0]!.id).toBe('p1');
+		expect(res.data[1]!.id).toBe('p2');
+	});
+});
+
+describe('LeverClient getArchivedCandidates expand (VAL-510)', () => {
+	let fetchSpy: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		fetchSpy = vi.fn();
+		vi.stubGlobal('fetch', fetchSpy);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	// VAL-510: archive search must NOT send expand=posting. "posting" is not an
+	// expandable field on GET /opportunities -- Lever 400s ("posting is not
+	// expandable"). Only expand=owner is valid. The posting_id FILTER itself is
+	// fine (200 OK); only the invalid expand value caused the 400.
+	it('VAL-510: sends expand=owner only, never expand=posting, with a posting_id filter', async () => {
+		const client = new LeverClient('test-key');
+		fetchSpy.mockResolvedValueOnce(
+			makeResponse({ ok: true, status: 200, json: { data: [{ id: 'opp-arch-1' }] } }),
+		);
+
+		const res = await client.getArchivedCandidates({ posting_id: 'p1' });
+
+		expect(res).toEqual({ data: [{ id: 'opp-arch-1' }] });
+		const url = new URL(calledUrl(fetchSpy));
+		expect(url.origin + url.pathname).toBe('https://api.lever.co/v1/opportunities');
+		expect(calledInit(fetchSpy).method).toBe('GET');
+
+		// expand params must be exactly ["owner"] -- owner present, posting absent.
+		const expandValues = url.searchParams.getAll('expand');
+		expect(expandValues).toEqual(['owner']);
+		expect(expandValues).not.toContain('posting');
+
+		// Raw query string guard mirroring the live 400 symptom.
+		expect(url.search).toContain('expand=owner');
+		expect(url.search).not.toContain('expand=posting');
+
+		// The valid posting_id FILTER is still sent (only the expand was wrong).
+		expect(url.searchParams.get('posting_id')).toBe('p1');
+	});
+});
