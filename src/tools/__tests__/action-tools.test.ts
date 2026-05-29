@@ -10,6 +10,7 @@ import { registerSearchTools } from '../search.js';
 import { registerUserTools } from '../users.js';
 import { registerCandidateTools } from '../candidates.js';
 import { registerSearchTools as registerAdvancedSearchTools } from '../../tools.js';
+import { registerInterviewTools } from '../../interview-tools.js';
 
 // A tiny fake McpServer that captures (name, schema, handler) registrations.
 type Handler = (args: any) => Promise<{ content: Array<{ type: string; text: string }> }>;
@@ -562,5 +563,96 @@ describe('lever_archive action=search recall + coverage (VAL-104)', () => {
 		expect(payload.coverage.complete).toBe(false);
 		expect(typeof payload.coverage.warning).toBe('string');
 		expect(payload.coverage.warning.length).toBeGreaterThan(0);
+	});
+});
+
+describe('lever_get_interview_insights interviewer_email fan-out (VAL-301)', () => {
+	// registerInterviewTools registers lever_get_interview_insights with the
+	// 4-arg overload (name, description, schema, handler). This local fake
+	// captures the LAST two args as (schema, handler) regardless of arity.
+	function makeInterviewFakeServer() {
+		const registry = new Map<string, { schema: any; handler: Handler }>();
+		const server = {
+			tool: (name: string, ...rest: any[]) => {
+				const handler = rest[rest.length - 1];
+				const schema = rest[rest.length - 2];
+				registry.set(name, { schema, handler });
+			},
+		} as unknown as McpServer;
+		return { server, registry };
+	}
+
+	it('matches interviews by interviewer_email and reports complete coverage (posting_id path)', async () => {
+		const client: any = {
+			getOpportunities: vi
+				.fn()
+				.mockResolvedValueOnce({
+					data: [{ id: 'opp1', name: 'Jane', owner: { email: 'r@x.com' } }],
+					hasNext: false,
+				}),
+			getOpportunityInterviews: vi.fn(async () => ({
+				data: [
+					{
+						id: 'iv1',
+						subject: 'Tech',
+						date: Date.now() + 86400000,
+						interviewers: [{ id: 'u1', name: 'Bob', email: 'bob@samba.tv' }],
+					},
+				],
+			})),
+		};
+		const fake = makeInterviewFakeServer();
+		registerInterviewTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_get_interview_insights')!;
+		const res = await handler({
+			interviewer_email: 'bob@samba.tv',
+			posting_id: 'post1',
+			time_scope: 'next_week',
+			view_type: 'detailed',
+			limit: 25,
+		});
+
+		const payload = parsePayload(res);
+		expect(payload.coverage.working_set_complete).toBe(true);
+		expect(payload.coverage.opportunities_scanned).toBe(1);
+		expect(payload.metadata.total_count).toBe(1);
+		expect(client.getOpportunityInterviews).toHaveBeenCalledTimes(1);
+		expect(Array.isArray(payload.data.interviews)).toBe(true);
+	});
+
+	it('returns total_count 0 when no interviewer matches', async () => {
+		const client: any = {
+			getOpportunities: vi
+				.fn()
+				.mockResolvedValueOnce({
+					data: [{ id: 'opp1', name: 'Jane', owner: { email: 'r@x.com' } }],
+					hasNext: false,
+				}),
+			getOpportunityInterviews: vi.fn(async () => ({
+				data: [
+					{
+						id: 'iv1',
+						subject: 'Tech',
+						date: Date.now() + 86400000,
+						interviewers: [{ id: 'u1', name: 'Bob', email: 'bob@samba.tv' }],
+					},
+				],
+			})),
+		};
+		const fake = makeInterviewFakeServer();
+		registerInterviewTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_get_interview_insights')!;
+		const res = await handler({
+			interviewer_email: 'nobody@x.com',
+			posting_id: 'post1',
+			time_scope: 'next_week',
+			view_type: 'detailed',
+			limit: 25,
+		});
+
+		const payload = parsePayload(res);
+		expect(payload.metadata.total_count).toBe(0);
 	});
 });
