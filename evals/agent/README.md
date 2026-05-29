@@ -28,8 +28,27 @@ checks whether each golden task actually worked. It complements -- and does
 3. `grade.ts` is **pure** (no I/O): it strips the `mcp__lever__` prefix off tool
    names, checks tool-selection against `expected_tool` /
    `expected_tool_sequence`, and applies the output assertion (non_empty,
-   has_field, behavior_check, graceful_error, tool_selection, write_op).
+   tool_functioned, has_field, behavior_check, graceful_error, tool_selection,
+   write_op).
 4. A markdown report lands at `evals/agent/last-run-report.md`.
+
+## What this eval measures: tool FUNCTION, not data presence
+
+The agent-eval grades whether each tool **works** -- did the agent select the
+right tool and did the call execute without a HARD error -- not whether a
+specific entity happens to have data. For per-candidate / sub-resource list
+reads where empty is legitimate (GT-009 feedback for a candidate with none,
+GT-010 archive search for a posting with none), the `tool_functioned` assertion
+PASSES on an honest-empty result ("no feedback found", "0 results"); only a hard
+tool error (crash / 4xx / 5xx in an error context / exception / `perform_as`
+failure / "bad request" / "unauthorized" / stack trace) FAILS. Known-existing-
+entity lookups stay strict `non_empty` (GT-001 / GT-003 / GT-008 inject a REAL
+id or email, so data is expected and the anti-false-negative strictness is the
+point). A graceful 404 not-found for an intentionally-bogus id stays
+`graceful_error` (GT-013). Because a live agent-eval invokes an LLM, its
+verdicts are **probabilistic** (run-to-run variance) -- treat it as a behavioral
+signal, not a hard CI gate. The deterministic gate remains `npm run eval:schema`
+(plus the grader self-test below, which proves the grading logic with no model).
 
 ## Running it
 
