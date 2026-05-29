@@ -251,6 +251,77 @@ const cases: Case[] = [
     expectSelected: false,
   },
   {
+    // GT-008 alternate step-2 path (VAL-510): the agent fetches "full
+    // application details" via lever_list_applications instead of
+    // lever_get_candidate. accept_tools makes position 2 satisfied by either,
+    // so this is a PASS.
+    name: "GT-008 alternate via lever_list_applications -> PASS",
+    taskId: "GT-008",
+    lines: [
+      toolUseLine("mcp__lever__lever_search_candidates", {
+        query: "sarah.chen@example.com",
+      }),
+      toolUseLine("mcp__lever__lever_list_applications", {
+        opportunity_id: "opp_7f3a",
+      }),
+      resultLine(
+        "Sarah Chen (opp_7f3a): 1 active application for Senior Engineer.",
+      ),
+    ],
+    expectPass: true,
+    expectSelected: true,
+  },
+  {
+    // GT-009 tool_functioned: expected tool called + honest "no feedback found"
+    // final text. A candidate legitimately having no feedback is a VALID empty
+    // result -- the tool functioned -> PASS.
+    name: "GT-009 tool_functioned honest no-feedback -> PASS",
+    taskId: "GT-009",
+    lines: [
+      toolUseLine("mcp__lever__lever_feedback", {
+        action: "list",
+        opportunity_id: "opp_abc123",
+      }),
+      resultLine(
+        "No interview feedback has been recorded for that candidate yet (0 feedback entries).",
+      ),
+    ],
+    expectPass: true,
+    expectTool: "lever_feedback",
+    expectSelected: true,
+  },
+  {
+    // GT-009 tool_functioned: expected tool called but the tool HARD-errored
+    // (perform_as / 400 bad request). A real tool failure -> FAIL.
+    name: "GT-009 tool_functioned hard error -> FAIL",
+    taskId: "GT-009",
+    lines: [
+      toolUseLine("mcp__lever__lever_feedback", {
+        action: "list",
+        opportunity_id: "opp_abc123",
+      }),
+      resultLine(
+        "Error: 400 Bad Request -- Missing required parameter: perform_as.",
+      ),
+    ],
+    expectPass: false,
+    expectSelected: true,
+  },
+  {
+    // GT-010 tool_functioned: the expected tool was NOT called -> FAIL, even
+    // though the agent produced some text.
+    name: "GT-010 tool_functioned expected tool not called -> FAIL",
+    taskId: "GT-010",
+    lines: [
+      toolUseLine("mcp__lever__lever_search_candidates", {
+        query: "post_x",
+      }),
+      resultLine("Here are some candidates I found by searching."),
+    ],
+    expectPass: false,
+    expectSelected: false,
+  },
+  {
     // GT-004 write op: params-only grading, tool selected with params -> PASS.
     name: "GT-004 write op params-only -> PASS",
     taskId: "GT-004",

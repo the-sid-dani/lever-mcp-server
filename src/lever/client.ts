@@ -501,7 +501,8 @@ export class LeverClient {
 		}
 
 		// Expand user objects for better data
-		queryParams.expand = ["owner", "posting"];
+		// "posting" is not an expandable field on /opportunities (Lever 400s); only owner is valid.
+		queryParams.expand = ["owner"];
 
 		return this.makeRequest("GET", "/opportunities", queryParams);
 	}

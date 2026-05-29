@@ -22,6 +22,13 @@ export interface GoldenTask {
   expected_params?: Record<string, unknown>;
   forbidden_params?: Record<string, unknown>;
   expected_tool_sequence?: string[];
+  // Optional per-position list of acceptable tool names for a sequence task.
+  // When present, position i of expected_tool_sequence is satisfied if the agent
+  // called ANY tool in accept_tools[i] (not strictly expected_tool_sequence[i]).
+  // Lets a step accept a legitimate alternate path without loosening the rest of
+  // the sequence (VAL-510: GT-008 "full application details" via either
+  // lever_get_candidate OR lever_list_applications).
+  accept_tools?: string[][];
   output_assertion: { type: string; [k: string]: unknown };
   layer: number;
   tags: string[];
@@ -107,6 +114,12 @@ export const GOLDEN_TASKS: GoldenTask[] = [
       "Find candidate sarah.chen@example.com then get her full application details",
     expected_tool: "lever_search_candidates",
     expected_tool_sequence: ["lever_search_candidates", "lever_get_candidate"],
+    // Step 2 ("full application details") is legitimately fetched via either
+    // lever_get_candidate OR lever_list_applications. Accept both (VAL-510).
+    accept_tools: [
+      ["lever_search_candidates"],
+      ["lever_get_candidate", "lever_list_applications"],
+    ],
     output_assertion: { type: "non_empty", field: "candidates", min_count: 1 },
     layer: 2,
     tags: ["compound", "chaining", "regression"],
@@ -116,7 +129,10 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     prompt: "What interview feedback exists for opp_abc123?",
     expected_tool: "lever_feedback",
     expected_params: { action: "list", opportunity_id: "opp_abc123" },
-    output_assertion: { type: "has_field", field: "count" },
+    // Per-candidate sub-resource read: a candidate may legitimately have NO
+    // feedback, so empty is a VALID outcome. Grade tool FUNCTION (selection +
+    // executes without a hard error), not whether this id happens to have data.
+    output_assertion: { type: "tool_functioned" },
     layer: 2,
     tags: ["feedback", "read"],
   },
@@ -125,7 +141,10 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     prompt: "Show archived candidates for posting post_x",
     expected_tool: "lever_archive",
     expected_params: { action: "search", posting_id: "post_x" },
-    output_assertion: { type: "has_field", field: "summary" },
+    // Per-posting sub-resource read: a posting may legitimately have NO archived
+    // candidates, so empty is a VALID outcome. Grade tool FUNCTION, not data
+    // presence for this particular posting.
+    output_assertion: { type: "tool_functioned" },
     layer: 2,
     tags: ["archive", "read"],
   },

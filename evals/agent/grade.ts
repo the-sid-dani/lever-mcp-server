@@ -124,6 +124,54 @@ const NOT_FOUND_RE =
 // Phrases that signal a hard crash / stack trace rather than a graceful report.
 const CRASH_RE = /\b(unhandled|stack\s*trace|TypeError|undefined is not|ECONNREFUSED|cannot read propert)/i;
 
+// HARD tool-error detector for the `tool_functioned` assertion. Matches the
+// signatures of a tool that crashed / returned a real error rather than an
+// honest-empty result. Case-insensitive. Deliberately distinct from
+// NOT_FOUND_RE: an honest "no results / none found / no feedback / 0 ..." is a
+// VALID empty response and must NOT match here.
+//
+// Matched signals:
+//   - the word "error" (error context)
+//   - "failed to ..." / "bad request" / "unauthorized"
+//   - "exception" / "crash" / "stack trace"
+//   - "perform_as" (a perform_as failure surfaces this token in the message)
+//   - HTTP 4xx / 5xx codes (\b4\d\d\b / \b5\d\d\b) -- in practice these only
+//     appear in tool output when the call errored
+const HARD_ERROR_RE =
+  /(\berror\b|failed\s+to\b|\bexception\b|\bbad\s+request\b|\bunauthorized\b|\bcrash\b|stack\s*trace|perform_as|\b4\d\d\b|\b5\d\d\b)/i;
+
+// Hard signals that an HONEST not-found phrasing would never legitimately
+// produce: failure verbs, perform_as failures, exceptions, crashes, bad
+// request / unauthorized. A bare 4xx code inside a not-found sentence is
+// graceful; these tokens are not.
+const GENUINELY_HARD_RE =
+  /(failed\s+to\b|\bexception\b|\bbad\s+request\b|\bunauthorized\b|\bcrash\b|stack\s*trace|perform_as)/i;
+
+/**
+ * Detect a HARD tool error in the final answer text. PASS-class empty results
+ * (NOT_FOUND_RE: "no results", "none found", "no feedback", "0 ...") are NOT
+ * treated as errors -- the tool functioned, it just had nothing to return.
+ *
+ * Exception: a graceful 404 not-found for an intentionally-bogus id (handled by
+ * the `graceful_error` assertion type, e.g. GT-013) is also an honest empty
+ * outcome. For `tool_functioned` we only flag a hard error when HARD_ERROR_RE
+ * matches AND the text does not read as a plain honest not-found.
+ */
+export function hasHardToolError(finalText: string): boolean {
+  const text = (finalText || "").trim();
+  if (!text) return false;
+  if (CRASH_RE.test(text)) return true;
+  if (!HARD_ERROR_RE.test(text)) return false;
+  // HARD_ERROR_RE matched. If the only error-ish signal is a graceful
+  // not-found phrasing (e.g. "404 -- no candidate exists"), treat it as an
+  // honest empty, not a hard error. A genuine hard error reads as a failure,
+  // not a clean "nothing here".
+  if (NOT_FOUND_RE.test(text)) {
+    return GENUINELY_HARD_RE.test(text);
+  }
+  return true;
+}
+
 // A name that looks like "First Last" — used to catch the agent asserting a
 // specific person was found when results were empty (GT-005 false-negative).
 const FOUND_PERSON_RE =
@@ -149,16 +197,28 @@ export function gradeTask(
   // --- Tool selection -------------------------------------------------------
   let selectedExpectedTool: boolean;
   if (task.expected_tool_sequence && task.expected_tool_sequence.length > 0) {
-    const missing = task.expected_tool_sequence.filter(
-      (t) => !calledTools.includes(t),
+    // Per-position acceptable-tool sets. If accept_tools is provided, position i
+    // is satisfied by ANY name in accept_tools[i]; otherwise it requires the
+    // exact expected_tool_sequence[i]. Either form lets a legitimate alternate
+    // path (e.g. lever_list_applications for "full application details") pass
+    // without loosening the rest of the sequence.
+    const acceptByPosition: string[][] = task.expected_tool_sequence.map(
+      (name, i) => task.accept_tools?.[i] ?? [name],
+    );
+    const missing = acceptByPosition.filter(
+      (accepted) => !accepted.some((name) => calledTools.includes(name)),
     );
     selectedExpectedTool = missing.length === 0;
     if (selectedExpectedTool) {
-      reasons.push(
-        `all sequence tools called: ${task.expected_tool_sequence.join(" -> ")}`,
+      const labels = acceptByPosition.map((accepted) =>
+        accepted.length > 1 ? `(${accepted.join("|")})` : accepted[0],
       );
+      reasons.push(`all sequence tools called: ${labels.join(" -> ")}`);
     } else {
-      reasons.push(`missing sequence tools: ${missing.join(", ")}`);
+      const missingLabels = missing.map((accepted) =>
+        accepted.length > 1 ? `(${accepted.join("|")})` : accepted[0],
+      );
+      reasons.push(`missing sequence tools: ${missingLabels.join(", ")}`);
     }
   } else {
     selectedExpectedTool = calledTools.includes(task.expected_tool);
@@ -277,6 +337,26 @@ export function gradeTask(
         reasons.push("agent did not report not-found / error");
       if (hallucinated) reasons.push("agent hallucinated a profile");
       if (pass) reasons.push("graceful not-found / error report");
+      break;
+    }
+    case "tool_functioned": {
+      // "Does the tool WORK" semantics. For per-candidate / sub-resource list
+      // reads where an empty result is legitimate (e.g. GT-009 feedback for a
+      // candidate with no feedback, GT-010 archive search for a posting with no
+      // archived candidates), the eval should measure tool FUNCTION, not whether
+      // this particular entity happens to have data. PASS iff:
+      //   (a) the expected tool (or full expected_tool_sequence) was called, AND
+      //   (b) the final text does NOT indicate a HARD tool error.
+      // An honest "no results / none found / no feedback / 0 ..." is a VALID
+      // empty response and PASSES -- the tool executed correctly.
+      const hardError = hasHardToolError(text);
+      pass = selectedExpectedTool && !hardError;
+      if (!selectedExpectedTool) reasons.push("expected tool not called");
+      if (hardError) reasons.push("final text indicates a HARD tool error");
+      if (pass)
+        reasons.push(
+          "tool functioned (expected tool called, no hard error; honest-empty accepted)",
+        );
       break;
     }
     case "write_op": {
