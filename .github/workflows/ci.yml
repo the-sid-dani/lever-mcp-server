@@ -40,6 +40,9 @@ jobs:
       - name: Test (vitest run — full suite)
         run: npm test
 
+      - name: Eval schema gate (Layer-0 tool contract — no secrets)
+        run: npm run eval:schema
+
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 

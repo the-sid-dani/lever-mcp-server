@@ -64,6 +64,10 @@ npm run deploy
 
 When making any code change, run `npm test` (full vitest suite), NOT scoped `npm test <path>` or `npm test --grep <name>`. Scoped runs miss regressions in adjacent code. Reference: prior agent reports confirmed this 3x during ATF buildout 2026-05-22.
 
+### Eval gate (R5)
+
+`npm run eval:schema` is a Layer-0 static contract check (all 17 tools registered, non-empty descriptions, valid schemas, golden-task tool names resolve). It needs no secrets and runs in ~1s. It is a HARD gate in GitHub Actions CI (runs right after `npm test`), so a contract regression blocks merge to main — and since deploy only happens manually off green main, it gates deploy. The recall false-negative regression (`src/__tests__/recall-regression.test.ts`) runs inside `npm test`. Full eval plan + deferred layers: `evals/README.md`.
+
 ### Convention: use `mcp__fastedit__fast_edit` for `.ts` files, not `Edit`
 
 A project-level hook may block the `Edit` tool on `.ts` files. Use `mcp__fastedit__fast_edit` instead. If that fails (object literals, multi-statement insertions, files > 150 LOC), fall back to a Python heredoc via `Bash`:
