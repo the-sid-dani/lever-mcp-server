@@ -12,6 +12,7 @@
 		"type-check": "tsc --noEmit",
 		"test": "vitest run",
 		"test:watch": "vitest",
+		"eval:schema": "tsx evals/schema-check.ts",
 		"docker:build": "docker build -t lever-mcp .",
 		"docker:run": "docker run -p 8080:8080 --env-file .env lever-mcp",
 		"deploy": "gcloud builds submit --config cloudbuild.yaml",
