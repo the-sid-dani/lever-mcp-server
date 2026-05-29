@@ -59,8 +59,46 @@ npx tsx evals/agent/run.ts          # EVAL_LIVE unset -> no claude spawn
 |-----|---------|---------|
 | `MCP_URL` | `http://localhost:8095/mcp` | MCP endpoint the agent connects to. |
 | `EVAL_LIVE` | unset | `1` to actually invoke `claude`; otherwise live mode is off. |
-| `EVAL_TASKS` | (read-only set) | Comma list of golden task ids to run. |
+| `EVAL_TASKS` | (LIVE_SAFE set) | Comma list of golden task ids to run. Explicit override wins over the default LIVE_SAFE / id-injected set. |
 | `EVAL_WRITES` | unset | `1` to include `write_op` tasks in the default set. |
+| `EVAL_OPP_ID` | unset | Real opportunity UUID. Replaces the literal `opp_abc123` in prompts + `expected_params`. The intentionally-bad `opp_DOESNOTEXIST` (GT-013) is never replaced. |
+| `EVAL_EMAIL` | unset | Real candidate email. Replaces `sarah.chen@example.com`. |
+| `EVAL_POSTING_ID` | unset | Real posting id. Replaces `post_x`. |
+
+When any of `EVAL_OPP_ID` / `EVAL_EMAIL` / `EVAL_POSTING_ID` is set, the matching
+placeholder is string-replaced in each task's prompt (and string-valued
+`expected_params`) before the agent runs. Applied substitutions are logged per
+task. Unset vars leave their placeholder untouched.
+
+## Default task set: LIVE_SAFE + id-injected
+
+A plain `npm run eval:agent` (no `EVAL_TASKS`, no injected ids) runs the
+**LIVE_SAFE** set -- tasks that give a clean pass against ANY real Lever account
+without needing seeded ids:
+
+- `GT-002` open roles
+- `GT-005` name-search honesty
+- `GT-011` requisitions
+- `GT-012` users
+- `GT-013` graceful not-found (uses an intentionally-bad id; tests honesty)
+- `GT-001` email lookup -- with a FAKE email the correct behavior is an HONEST
+  not-found, so GT-001 passes on honest-not-found here (its `anti-false-negative`
+  tag makes the grader accept honest-not-found and only fail a hallucinated
+  found-when-empty result).
+
+When `EVAL_OPP_ID` / `EVAL_EMAIL` / `EVAL_POSTING_ID` are provided, the
+id-dependent tasks `GT-003`, `GT-008`, `GT-009`, `GT-010` join the set as
+real-data tasks (they need a real id to return data).
+
+`EVAL_TASKS` (explicit comma list) still overrides the whole default selection.
+
+## Tool scope
+
+The agent is launched with `--allowed-tools "mcp__lever__*"` AND
+`--disallowed-tools "Bash Edit Write WebFetch WebSearch"`, so the eval stays
+focused on MCP tool usage with no local file/shell/web side effects. `ToolSearch`
+is intentionally NOT blocked -- the agent needs it to discover the MCP tools in
+this environment.
 
 ## Read-only by default + writes
 

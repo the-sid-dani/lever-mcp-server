@@ -66,9 +66,11 @@ const cases: Case[] = [
     expectSelected: true,
   },
   {
-    // GT-001 anti-false-negative: tool called but agent says not found ->
-    // must FAIL even though the tool was selected.
-    name: "GT-001 tool called but reports not-found -> FAIL (anti-false-negative)",
+    // GT-001 anti-false-negative honesty: tool called, agent honestly reports
+    // not-found (no hallucinated person) -> PASS. The tool worked and the agent
+    // did not fabricate a result, which is the correct behavior against a FAKE
+    // email. (This is the GT-001-style honest-not-found PASS case.)
+    name: "GT-001 honest not-found -> PASS (anti-false-negative honesty)",
     taskId: "GT-001",
     lines: [
       toolUseLine("mcp__lever__lever_search_candidates", {
@@ -76,7 +78,36 @@ const cases: Case[] = [
       }),
       resultLine("No candidates found matching that email."),
     ],
+    expectPass: true,
+    expectSelected: true,
+  },
+  {
+    // GT-001 the REAL anti-false-negative bug: tool returned empty but the agent
+    // ASSERTS a specific person was found -> must FAIL.
+    name: "GT-001 hallucinates found-when-empty -> FAIL (anti-false-negative)",
+    taskId: "GT-001",
+    lines: [
+      toolUseLine("mcp__lever__lever_search_candidates", {
+        query: "sarah.chen@example.com",
+      }),
+      resultLine(
+        "No results were returned, but I found Sarah Chen, a senior engineer.",
+      ),
+    ],
     expectPass: false,
+    expectSelected: true,
+  },
+  {
+    // GT-001 happy real-data path: tool called, real candidate returned -> PASS.
+    name: "GT-001 real-data answer -> PASS",
+    taskId: "GT-001",
+    lines: [
+      toolUseLine("mcp__lever__lever_search_candidates", {
+        query: "sarah.chen@example.com",
+      }),
+      resultLine("Sarah Chen, opportunity opp_7f3a, applied for Senior Engineer."),
+    ],
+    expectPass: true,
     expectSelected: true,
   },
   {
@@ -122,6 +153,54 @@ const cases: Case[] = [
       }),
       resultLine(
         "That candidate could not be found (opportunity opp_DOESNOTEXIST does not exist). No profile to show.",
+      ),
+    ],
+    expectPass: true,
+    expectSelected: true,
+  },
+  {
+    // GT-013 varied phrasing: a graceful not-found worded differently must
+    // still be recognized as PASS (broadened keyword set).
+    name: "GT-013 graceful not-found varied phrasing -> PASS",
+    taskId: "GT-013",
+    lines: [
+      toolUseLine("mcp__lever__lever_get_candidate", {
+        opportunity_id: "opp_DOESNOTEXIST",
+      }),
+      resultLine(
+        "I was unable to locate that opportunity -- there is no such candidate, so no profile is available.",
+      ),
+    ],
+    expectPass: true,
+    expectSelected: true,
+  },
+  {
+    // GT-013 real live phrasing (VAL-508b): the exact string a live agent
+    // returned for a bogus id. "404 ... no candidate ... exists" is a graceful
+    // not-found and MUST be recognized as PASS (was a grader false-negative).
+    name: "GT-013 live 404/no-candidate-exists phrasing -> PASS",
+    taskId: "GT-013",
+    lines: [
+      toolUseLine("mcp__lever__lever_get_candidate", {
+        opportunity_id: "opp_DOESNOTEXIST",
+      }),
+      resultLine(
+        "404 — no candidate with ID opp_DOESNOTEXIST exists in Lever.",
+      ),
+    ],
+    expectPass: true,
+    expectSelected: true,
+  },
+  {
+    // Guard (VAL-508b): a SUCCESSFUL profile answer graded against a non_empty
+    // task must still PASS -- the broadened not-found regex must NOT misclassify
+    // a real candidate (name + email) as not-found.
+    name: "GT-002 successful profile answer -> PASS (not misclassified as not-found)",
+    taskId: "GT-002",
+    lines: [
+      toolUseLine("mcp__lever__lever_list_open_roles", {}),
+      resultLine(
+        "Artur Kraskov, artur.kraskov@protonmail.com, applied to Software Engineer.",
       ),
     ],
     expectPass: true,

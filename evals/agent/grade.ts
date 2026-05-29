@@ -116,8 +116,10 @@ export interface TaskGrade {
 }
 
 // Phrases that signal the agent reported no data / could not find anything.
+// Kept deliberately broad + case-insensitive so a graceful not-found is
+// recognized regardless of phrasing (GT-013 can be worded many ways).
 const NOT_FOUND_RE =
-  /\b(not\s+found|no\s+results?|no\s+matching|no\s+candidates?|couldn'?t\s+find|could\s+not\s+find|nothing\s+found|zero\s+results?|0\s+results?|does\s+not\s+exist|doesn'?t\s+exist|empty)\b/i;
+  /\b(not\s+found|no\s+results?|no\s+matching|no\s+candidates?|no\s+candidate\b|couldn'?t\s+(find|retrieve|locate)|could\s+not\s+(find|be\s+(found|retrieved)|retrieve)|cannot\s+find|can'?t\s+find|unable\s+to\s+(find|locate|retrieve)|nothing\s+found|zero\s+results?|0\s+results?|does\s+not\s+exist|doesn'?t\s+exist|do\s+not\s+exist|don'?t\s+exist|not\s+exist|no\s+such|invalid\s+(id|candidate)|invalid|empty|404|no\s+\w+(?:\s+\w+){0,6}?\s+exists?\b)\b/i;
 
 // Phrases that signal a hard crash / stack trace rather than a graceful report.
 const CRASH_RE = /\b(unhandled|stack\s*trace|TypeError|undefined is not|ECONNREFUSED|cannot read propert)/i;
@@ -177,8 +179,31 @@ export function gradeTask(
     case "non_empty": {
       const hasText = text.length > 0;
       const looksNotFound = NOT_FOUND_RE.test(text);
-      // Anti-false-negative: when the task expects data (e.g. GT-001 email
-      // lookup) a not-found answer is a FAILURE even though the agent "tried".
+      const isAntiFalseNegative = task.tags.includes("anti-false-negative");
+      if (isAntiFalseNegative) {
+        // Anti-false-negative semantics (e.g. GT-001 email lookup): the bug we
+        // hunt is the agent ASSERTING a specific found result that contradicts
+        // an empty tool response. An HONEST not-found is acceptable -- the tool
+        // worked and the agent did not hallucinate data. So pass if the tool
+        // was called and the agent either (a) returned real data, or (b) gave
+        // an honest not-found. Only FAIL when the agent both reports empty AND
+        // names a specific found person (the real false-negative bug).
+        const hallucinatesFound = looksNotFound && FOUND_PERSON_RE.test(text);
+        pass = selectedExpectedTool && hasText && !hallucinatesFound;
+        if (!hasText) reasons.push("final text is empty");
+        if (hallucinatesFound)
+          reasons.push(
+            "FALSE NEGATIVE: asserts a specific person found while reporting empty results",
+          );
+        else if (pass)
+          reasons.push(
+            looksNotFound
+              ? "honest not-found accepted (anti-false-negative: tool called, no hallucination)"
+              : "non-empty data answer with expected tool",
+          );
+        break;
+      }
+      // Default non_empty: a not-found answer is a FAILURE.
       pass = selectedExpectedTool && hasText && !looksNotFound;
       if (!hasText) reasons.push("final text is empty");
       if (looksNotFound)
