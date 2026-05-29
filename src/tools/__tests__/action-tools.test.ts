@@ -729,3 +729,78 @@ describe('VAL-503 stuck-cursor regression (non-advancing cursor must not hang)',
 		expect(payload.error).toBeUndefined();
 	});
 });
+
+describe('VAL-504 search-loop stuck-cursor safety + honest coverage', () => {
+	// Both lever_search_candidates and lever_advanced_search register handlers
+	// whose LAST two args are (schema, handler). This local fake captures them
+	// regardless of arity (search_candidates is 3-arg, advanced_search is 4-arg).
+	function makeArityFakeServer() {
+		const registry = new Map<string, { schema: any; handler: Handler }>();
+		const server = {
+			tool: (name: string, ...rest: any[]) => {
+				const handler = rest[rest.length - 1];
+				const schema = rest[rest.length - 2];
+				registry.set(name, { schema, handler });
+			},
+		} as unknown as McpServer;
+		return { server, registry };
+	}
+
+	it('lever_search_candidates RETURNS on a non-advancing cursor and reports complete:false', async () => {
+		// Page 1 + page 2 both report next:'x' (cursor never advances). A naive
+		// while(true) would spin forever; the guard breaks after the 2nd page.
+		// The 3rd mock rejects, so an infinite loop surfaces as that throw.
+		const getOpportunities = vi
+			.fn()
+			.mockResolvedValueOnce({ data: [{ id: 'a', name: 'Jane' }], hasNext: true, next: 'x' })
+			.mockResolvedValueOnce({ data: [{ id: 'b', name: 'Jane' }], hasNext: true, next: 'x' })
+			.mockRejectedValue(new Error('STUCK_CURSOR_LOOPED'));
+		const client: any = { getOpportunities };
+		const fake = makeArityFakeServer();
+		registerSearchTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_search_candidates')!;
+		const res = await handler({ query: 'Jane', limit: 200, page: 1 });
+
+		expect(getOpportunities).toHaveBeenCalledTimes(2);
+		const payload = parsePayload(res);
+		// Defensive stop -- the sweep may be partial, so coverage is NOT complete.
+		expect(payload.coverage.complete).toBe(false);
+		expect(payload.error).toBeUndefined();
+	});
+
+	it('lever_search_candidates reports complete:true when the sweep reaches hasNext:false', async () => {
+		const getOpportunities = vi
+			.fn()
+			.mockResolvedValueOnce({ data: [{ id: 'a', name: 'Jane' }], hasNext: false });
+		const client: any = { getOpportunities };
+		const fake = makeArityFakeServer();
+		registerSearchTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_search_candidates')!;
+		const res = await handler({ query: 'Jane', limit: 200, page: 1 });
+
+		expect(getOpportunities).toHaveBeenCalledTimes(1);
+		const payload = parsePayload(res);
+		expect(payload.coverage.complete).toBe(true);
+	});
+
+	it('lever_advanced_search RETURNS on a non-advancing cursor and reports complete:false', async () => {
+		const getOpportunities = vi
+			.fn()
+			.mockResolvedValueOnce({ data: [{ id: 'a', name: 'Jane' }], hasNext: true, next: 'x' })
+			.mockResolvedValueOnce({ data: [{ id: 'b', name: 'Jane' }], hasNext: true, next: 'x' })
+			.mockRejectedValue(new Error('STUCK_CURSOR_LOOPED'));
+		const client: any = { getOpportunities };
+		const fake = makeArityFakeServer();
+		registerAdvancedSearchTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_advanced_search')!;
+		const res = await handler({ limit: 50, page: 1, mode: 'comprehensive', archived: false });
+
+		expect(getOpportunities).toHaveBeenCalledTimes(2);
+		const payload = parsePayload(res);
+		expect(payload.coverage.complete).toBe(false);
+		expect(payload.error).toBeUndefined();
+	});
+});

@@ -79,6 +79,7 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 					let offset: string | undefined;
 					let pagesScanned = 0;
 					let recordsScanned = 0;
+					let sawLastPage = false;
 					const queryLower = args.query.toLowerCase();
 
 					while (true) {
@@ -101,7 +102,16 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 						}
 
 						pagesScanned++;
-						if (!response.hasNext || !response.next) break;
+						// VAL-504: API-terminal page reached -- the sweep is honest.
+						if (!response.hasNext || !response.next) {
+							sawLastPage = true;
+							break;
+						}
+
+						// VAL-504: non-advancing cursor guard. A stuck cursor would
+						// otherwise loop forever; break defensively (sawLastPage stays
+						// false -- the sweep may be partial, so coverage is not complete).
+						if (response.next === offset) break;
 
 						// Use the next token from the API response
 						offset = response.next;
@@ -127,12 +137,13 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 						next_page: hasMore ? page + 1 : null,
 						query: args.query,
 						candidates: paginatedCandidates.map(formatOpportunity),
-						// VAL-102: coverage proves the result is the full set. The loop
-						// always runs to hasNext:false, so complete is always true.
+						// VAL-504: coverage is DERIVED -- complete only if the sweep
+						// reached the API's last page (hasNext:false). A defensive
+						// stuck-cursor break leaves this false (honest, possibly partial).
 						coverage: {
 							records_scanned: recordsScanned,
 							pages_scanned: pagesScanned,
-							complete: true,
+							complete: sawLastPage,
 						},
 					};
 
