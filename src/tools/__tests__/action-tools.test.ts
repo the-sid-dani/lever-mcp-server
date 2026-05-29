@@ -671,3 +671,61 @@ describe('lever_get_interview_insights interviewer_email fan-out (VAL-301)', () 
 		expect(payload.metadata.total_count).toBe(0);
 	});
 });
+
+describe('VAL-503 stuck-cursor regression (non-advancing cursor must not hang)', () => {
+	// Both lever_get_users and lever_notes register with overloads whose LAST two
+	// args are (schema, handler). This local fake captures them regardless of arity.
+	function makeArityFakeServer() {
+		const registry = new Map<string, { schema: any; handler: Handler }>();
+		const server = {
+			tool: (name: string, ...rest: any[]) => {
+				const handler = rest[rest.length - 1];
+				const schema = rest[rest.length - 2];
+				registry.set(name, { schema, handler });
+			},
+		} as unknown as McpServer;
+		return { server, registry };
+	}
+
+	it('lever_get_users RETURNS on a non-advancing cursor (calls getUsers exactly 2x)', async () => {
+		// Page 1 + page 2 both report next:'a' (cursor never advances). A naive
+		// while(true) loop would spin forever; collectAllPages must break after the
+		// 2nd page. The 3rd mock throws, so an infinite loop surfaces as that throw.
+		const getUsers = vi
+			.fn()
+			.mockResolvedValueOnce({ data: [{ id: 'u1' }], hasNext: true, next: 'a' })
+			.mockResolvedValueOnce({ data: [{ id: 'u2' }], hasNext: true, next: 'a' })
+			.mockRejectedValue(new Error('STUCK_CURSOR_LOOPED'));
+		const client: any = { getUsers };
+		const fake = makeArityFakeServer();
+		registerUserTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_get_users')!;
+		const res = await handler({ limit: 100, include_deactivated: false });
+
+		expect(getUsers).toHaveBeenCalledTimes(2);
+		const payload = parsePayload(res);
+		// Both pages were accumulated before the defensive break.
+		expect(payload.count).toBe(2);
+		expect(payload.error).toBeUndefined();
+	});
+
+	it("lever_notes action='list' RETURNS on a non-advancing cursor (calls getNotes exactly 2x)", async () => {
+		const getNotes = vi
+			.fn()
+			.mockResolvedValueOnce({ data: [{ id: 'n1' }], hasNext: true, next: 'a' })
+			.mockResolvedValueOnce({ data: [{ id: 'n2' }], hasNext: true, next: 'a' })
+			.mockRejectedValue(new Error('STUCK_CURSOR_LOOPED'));
+		const client: any = { getNotes };
+		const fake = makeArityFakeServer();
+		registerNoteTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_notes')!;
+		const res = await handler({ action: 'list', opportunity_id: 'opp-1' });
+
+		expect(getNotes).toHaveBeenCalledTimes(2);
+		const payload = parsePayload(res);
+		expect(payload.count).toBe(2);
+		expect(payload.error).toBeUndefined();
+	});
+});

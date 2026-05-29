@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "../lever/client.js";
 import { getSharedResolver, resolvePerformAs } from "../auth/resolve-perform-as.js";
+import { collectAllPages } from "../utils/paginate.js";
 
 export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// List files for a candidate
@@ -257,22 +258,12 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 		},
 		async (args) => {
 			try {
-				const allEmails: any[] = [];
-				let offset: string | undefined;
-
-				while (true) {
-					const response = await client.getEmails(args.opportunity_id, {
+				const { items: allEmails } = await collectAllPages((offset) =>
+					client.getEmails(args.opportunity_id, {
 						limit: args.limit,
 						offset,
-					});
-
-					if (response.data && response.data.length > 0) {
-						allEmails.push(...response.data);
-					}
-
-					if (!response.hasNext || !response.next) break;
-					offset = response.next;
-				}
+					}),
+				);
 
 				return {
 					content: [

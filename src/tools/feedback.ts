@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "../lever/client.js";
 import { getSharedResolver, resolvePerformAs } from "../auth/resolve-perform-as.js";
+import { collectAllPages } from "../utils/paginate.js";
 
 export function registerFeedbackTools(server: McpServer, client: LeverClient) {
 	// lever_feedback — consolidated (replaces lever_list_feedback_templates + lever_list_feedback + lever_get_feedback + lever_submit_feedback)
@@ -29,19 +30,12 @@ export function registerFeedbackTools(server: McpServer, client: LeverClient) {
 			try {
 				switch (args.action) {
 					case "list_templates": {
-						const allTemplates: any[] = [];
-						let offset: string | undefined;
-						while (true) {
-							const response = await client.getFeedbackTemplates({
+						const { items: allTemplates } = await collectAllPages((offset) =>
+							client.getFeedbackTemplates({
 								limit: args.limit ?? 100,
 								offset,
-							});
-							if (response.data && response.data.length > 0) {
-								allTemplates.push(...response.data);
-							}
-							if (!response.hasNext || !response.next) break;
-							offset = response.next;
-						}
+							}),
+						);
 						return {
 							content: [{
 								type: "text",
@@ -66,19 +60,12 @@ export function registerFeedbackTools(server: McpServer, client: LeverClient) {
 					}
 					case "list": {
 						if (!args.opportunity_id) throw new Error("opportunity_id is required for action='list'");
-						const allFeedback: any[] = [];
-						let offset: string | undefined;
-						while (true) {
-							const response = await client.getOpportunityFeedback(args.opportunity_id, {
+						const { items: allFeedback } = await collectAllPages((offset) =>
+							client.getOpportunityFeedback(args.opportunity_id!, {
 								limit: args.limit ?? 100,
 								offset,
-							});
-							if (response.data && response.data.length > 0) {
-								allFeedback.push(...response.data);
-							}
-							if (!response.hasNext || !response.next) break;
-							offset = response.next;
-						}
+							}),
+						);
 						return {
 							content: [{
 								type: "text",

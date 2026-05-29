@@ -17,6 +17,7 @@ import type {
 } from "../types/lever.js";
 import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger.js";
+import { collectAllPages } from "../utils/paginate.js";
 
 // Simple token bucket implementation for rate limiting
 class TokenBucket {
@@ -438,29 +439,12 @@ export class LeverClient {
 		// VAL-103: paginate ALL postings (no self-imposed batch cap) so no role
 		// is silently dropped. The client token bucket serializes requests +
 		// handles 429 backoff, so sequential awaits here are correct.
-		const allPostings: LeverPosting[] = [];
-		let offset: string | undefined;
-		let batchesFetched = 0;
+		// VAL-503: cursor-safe via collectAllPages (stuck-cursor + empty-page guards).
+		const { items: allPostings } = await collectAllPages((offset) =>
+			this.getPostings(state, 100, offset, ["owner", "hiringManager"]),
+		);
 
-		// Fetch every page until the API reports no further pages.
-		while (true) {
-			const response = await this.getPostings(state, 100, offset, ["owner", "hiringManager"]);
-
-			if (response.data && response.data.length > 0) {
-				allPostings.push(...response.data);
-			}
-
-			batchesFetched++;
-
-			// Stop if no more data
-			if (!response.hasNext || !response.next) {
-				break;
-			}
-
-			offset = response.next;
-		}
-		
-		logger.debug(`getPostingsByOwner: Fetched ${allPostings.length} postings in ${batchesFetched} batches for owner search: ${ownerName}`);
+		logger.debug(`getPostingsByOwner: Fetched ${allPostings.length} postings for owner search: ${ownerName}`);
 		
 		// Filter by owner name (case-insensitive partial match)
 		const filteredPostings = allPostings.filter(posting => {
