@@ -610,7 +610,7 @@ describe('lever_get_interview_insights interviewer_email fan-out (VAL-301)', () 
 					{
 						id: 'iv1',
 						subject: 'Tech',
-						date: Date.now() + 86400000,
+						date: Date.now() + 10 * 86400000, // ~10d out -> within next_week (+7d..+14d)
 						interviewers: [{ id: 'u1', name: 'Bob', email: 'bob@samba.tv' }],
 					},
 				],
@@ -649,7 +649,7 @@ describe('lever_get_interview_insights interviewer_email fan-out (VAL-301)', () 
 					{
 						id: 'iv1',
 						subject: 'Tech',
-						date: Date.now() + 86400000,
+						date: Date.now() + 10 * 86400000, // ~10d out -> within next_week (+7d..+14d)
 						interviewers: [{ id: 'u1', name: 'Bob', email: 'bob@samba.tv' }],
 					},
 				],
@@ -802,5 +802,135 @@ describe('VAL-504 search-loop stuck-cursor safety + honest coverage', () => {
 		const payload = parsePayload(res);
 		expect(payload.coverage.complete).toBe(false);
 		expect(payload.error).toBeUndefined();
+	});
+});
+
+describe('VAL-505 archive exhaustive fan-out guard + interview window correctness', () => {
+	// Both lever_archive (4-arg: name, desc, schema, handler) and
+	// lever_get_interview_insights register handlers whose LAST two args are
+	// (schema, handler). This local fake captures them regardless of arity.
+	function makeArityFakeServer() {
+		const registry = new Map<string, { schema: any; handler: Handler }>();
+		const server = {
+			tool: (name: string, ...rest: any[]) => {
+				const handler = rest[rest.length - 1];
+				const schema = rest[rest.length - 2];
+				registry.set(name, { schema, handler });
+			},
+		} as unknown as McpServer;
+		return { server, registry };
+	}
+
+	it('archive search with fetch_all_pages=true SKIPS the per-candidate interview fan-out and notes it', async () => {
+		const getOpportunityInterviews = vi.fn(async () => ({ data: [] }));
+		const client: any = {
+			getArchivedCandidates: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'c1' }], hasNext: true, next: 'o2' })
+				.mockResolvedValueOnce({ data: [{ id: 'c2' }], hasNext: false }),
+			getOpportunityInterviews,
+		};
+		const fake = makeArityFakeServer();
+		registerArchiveTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_archive')!;
+		// Note: include_interviews defaults to true, but fetch_all_pages must force it OFF.
+		const res = await handler({ action: 'search', fetch_all_pages: true });
+
+		// The fan-out that would fire one interview call per archived candidate
+		// over thousands of records must NOT run in exhaustive mode.
+		expect(getOpportunityInterviews).not.toHaveBeenCalled();
+		const payload = parsePayload(res);
+		expect(payload.summary.total_archived_candidates).toBe(2);
+		expect(typeof payload.summary.interviews_note).toBe('string');
+		expect(payload.summary.interviews_note.length).toBeGreaterThan(0);
+	});
+
+	it('archive search single-page (fetch_all_pages=false, include_interviews=true) STILL fetches interviews', async () => {
+		const getOpportunityInterviews = vi.fn(async () => ({ data: [{ id: 'iv1' }] }));
+		const client: any = {
+			getArchivedCandidates: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'c1' }], hasNext: false }),
+			getOpportunityInterviews,
+		};
+		const fake = makeArityFakeServer();
+		registerArchiveTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_archive')!;
+		const res = await handler({ action: 'search', fetch_all_pages: false, include_interviews: true });
+
+		// Single-page path keeps the (bounded) interview fan-out.
+		expect(getOpportunityInterviews).toHaveBeenCalledTimes(1);
+		const payload = parsePayload(res);
+		expect(payload.summary.interviews_note).toBeUndefined();
+	});
+
+	it('computeTimeWindow: next_week covers +7d..+14d (distinct from this_week)', async () => {
+		const tenDaysOut = Date.now() + 10 * 86400000;
+		const client: any = {
+			getOpportunities: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'o1' }], hasNext: false }),
+			getOpportunityInterviews: vi.fn(async () => ({
+				data: [
+					{
+						id: 'iv1',
+						subject: 'Tech',
+						date: tenDaysOut,
+						interviewers: [{ id: 'u1', name: 'Bob', email: 'bob@samba.tv' }],
+					},
+				],
+			})),
+		};
+		const fake = makeArityFakeServer();
+		registerInterviewTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_get_interview_insights')!;
+		const res = await handler({
+			interviewer_email: 'bob@samba.tv',
+			posting_id: 'p1',
+			time_scope: 'next_week',
+			view_type: 'detailed',
+			limit: 25,
+		});
+
+		const payload = parsePayload(res);
+		// +10d falls inside next_week (+7d..+14d) -> matched.
+		expect(payload.metadata.total_count).toBe(1);
+	});
+
+	it('computeTimeWindow: this_week EXCLUDES a +10d interview (proves windows are distinct)', async () => {
+		const tenDaysOut = Date.now() + 10 * 86400000;
+		const client: any = {
+			getOpportunities: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'o1' }], hasNext: false }),
+			getOpportunityInterviews: vi.fn(async () => ({
+				data: [
+					{
+						id: 'iv1',
+						subject: 'Tech',
+						date: tenDaysOut,
+						interviewers: [{ id: 'u1', name: 'Bob', email: 'bob@samba.tv' }],
+					},
+				],
+			})),
+		};
+		const fake = makeArityFakeServer();
+		registerInterviewTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_get_interview_insights')!;
+		const res = await handler({
+			interviewer_email: 'bob@samba.tv',
+			posting_id: 'p1',
+			time_scope: 'this_week',
+			view_type: 'detailed',
+			limit: 25,
+		});
+
+		const payload = parsePayload(res);
+		// +10d is beyond this_week (0..+7d) -> NOT matched.
+		expect(payload.metadata.total_count).toBe(0);
 	});
 });

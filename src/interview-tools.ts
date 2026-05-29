@@ -4,6 +4,7 @@ import type { LeverClient } from "./lever/client.js";
 import type { LeverInterview, LeverPanel, LeverOpportunity } from "./types/lever.js";
 import { mapLimit } from "./utils/concurrency.js";
 import { getSharedResolver, resolvePerformAs } from "./auth/resolve-perform-as.js";
+import { collectAllPages } from "./utils/paginate.js";
 
 /**
  * Register interview-related tools with the MCP server
@@ -103,34 +104,48 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
 
           if (args.posting_id) {
             // Scoped by posting - paginate fully (bounded by the posting, safe).
-            do {
-              const page = await client.getOpportunities({
-                posting_id: args.posting_id,
-                limit: 100,
-                offset
-              });
-              workingSet.push(...(page.data || []));
-              offset = page.hasNext ? page.next : undefined;
-            } while (offset);
-            workingSetComplete = true;
+            // collectAllPages gives stuck-cursor safety + an honest complete flag.
+            const { items: scopedSet, complete } = await collectAllPages(
+              (off) =>
+                client.getOpportunities({
+                  posting_id: args.posting_id,
+                  limit: 100,
+                  offset: off
+                }) as Promise<{ data?: LeverOpportunity[]; hasNext?: boolean; next?: string }>
+            );
+            workingSet.push(...scopedSet);
+            workingSetComplete = complete;
           } else {
             // Unscoped - paginate but STOP at the safety cap. Full 6000+ x
             // per-opp interview fan-out is too expensive for a synchronous call.
+            // We keep this INLINE (not collectAllPages) because the cap here is an
+            // intentional SILENT truncation with complete=false; collectAllPages
+            // would THROW on maxPages instead. The stuck-cursor guard below keeps
+            // a non-advancing cursor from looping forever.
+            let reachedApiEnd = false;
             do {
-              const page = await client.getOpportunities({
+              const response = await client.getOpportunities({
                 limit: 100,
                 offset
               });
-              workingSet.push(...(page.data || []));
+              workingSet.push(...(response.data || []));
               if (workingSet.length >= SAFETY_CAP) {
-                // Cap hit. If more pages existed, coverage is incomplete.
-                workingSetComplete = !page.hasNext;
-                workingSet.length = Math.min(workingSet.length, SAFETY_CAP);
+                // Cap hit. Stop scanning regardless of whether more pages exist.
+                offset = undefined;
+              } else if (!response.hasNext || !response.next) {
+                reachedApiEnd = true;
+                offset = undefined;
+              } else if (response.next === offset) {
+                // Stuck-cursor guard: cursor did not advance -> would loop forever.
                 offset = undefined;
               } else {
-                offset = page.hasNext ? page.next : undefined;
+                offset = response.next;
               }
             } while (offset);
+            // Enforce the cap unconditionally and report honest completeness:
+            // complete only when we ran to the API end AND stayed under the cap.
+            workingSet.length = Math.min(workingSet.length, SAFETY_CAP);
+            workingSetComplete = reachedApiEnd && workingSet.length < SAFETY_CAP;
           }
 
           // Optional client-side owner filter.
@@ -166,7 +181,13 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
           // Compute the time window for filtering.
           const window = computeTimeWindow(args.time_scope, args.date_from, args.date_to);
           const now = Date.now();
-          const targetsPast = args.time_scope === "past_week";
+          // Scopes that intentionally include the past. For these, the
+          // !include_completed "drop past interviews" rule must NOT apply, or it
+          // would silently hide every interview the scope is meant to surface.
+          const scopeIncludesPast =
+            args.time_scope === "past_week" ||
+            args.time_scope === "this_month" ||
+            args.time_scope === "custom";
 
           const interviewerNeedle = args.interviewer_email
             ? args.interviewer_email.toLowerCase()
@@ -185,7 +206,8 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
             if (Number.isNaN(t)) return false;
             if (t < window.start || t > window.end) return false;
             // Drop completed (past) interviews unless explicitly requested.
-            if (!args.include_completed && !targetsPast && t < now) return false;
+            // Only applies to forward-looking scopes; past-inclusive scopes keep them.
+            if (!args.include_completed && !scopeIncludesPast && t < now) return false;
             return true;
           });
 
@@ -451,21 +473,24 @@ function computeTimeWindow(
     return { start, end };
   }
 
-  // Start of the local day for "this_week" anchoring.
+  // Start of the local day, anchoring all relative windows.
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
   switch (timeScope) {
     case "past_week":
-      return { start: startOfToday - 7 * day, end: startOfToday + day - 1 };
+      // The 7 days ending at the start of today.
+      return { start: startOfToday - 7 * day, end: startOfToday };
     case "next_week":
-      return { start: startOfToday, end: startOfToday + 7 * day };
+      // The week AFTER this_week -- distinct from this_week (day +7 .. +14).
+      return { start: startOfToday + 7 * day, end: startOfToday + 14 * day };
     case "this_month": {
       const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
       return { start, end };
     }
     case "this_week":
     default:
+      // The 7 days starting today (day 0 .. +7).
       return { start: startOfToday, end: startOfToday + 7 * day };
   }
 }

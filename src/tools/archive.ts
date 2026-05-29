@@ -117,7 +117,7 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 						let hasNext = true;
 						let totalFetched = 0;
 						let pageCount = 0;
-						const includeInterviews = args.include_interviews ?? true;
+						const includeInterviews = args.fetch_all_pages ? false : (args.include_interviews ?? true);
 						const limit = args.limit ?? 100;
 
 						// Fetch candidates with pagination. fetch_all_pages=true loops to
@@ -147,6 +147,8 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 
 							// Multi-page mode: continue until there are no more results.
 							if (!response.hasNext || !response.next) break;
+							// Stuck-cursor guard: a non-advancing cursor would loop forever.
+							if (response.next === offset) break;
 							offset = response.next;
 						}
 
@@ -222,6 +224,13 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 								fetch_mode: args.fetch_all_pages ? "All pages" : "Single page",
 							},
 						};
+
+						// In exhaustive (fetch_all_pages) mode interviews are skipped to
+						// avoid a per-candidate interview fan-out over thousands of archived
+						// candidates. Surface a note so the omission is explicit.
+						if (args.fetch_all_pages) {
+							(summary as any).interviews_note = "Interview details skipped in exhaustive (fetch_all_pages) mode to avoid a per-candidate fan-out; use lever_get_interview_insights per candidate.";
+						}
 
 						// Always surface coverage so a partial single-page result can never be
 						// mistaken for the full set. complete is true only when exhaustive:
