@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "../lever/client.js";
+import { getSharedResolver, resolvePerformAs } from "../auth/resolve-perform-as.js";
 
 export function registerFeedbackTools(server: McpServer, client: LeverClient) {
 	// lever_feedback — consolidated (replaces lever_list_feedback_templates + lever_list_feedback + lever_get_feedback + lever_submit_feedback)
@@ -125,7 +126,7 @@ export function registerFeedbackTools(server: McpServer, client: LeverClient) {
 						if (!args.opportunity_id) throw new Error("opportunity_id is required for action='submit'");
 						if (!args.base_template_id) throw new Error("base_template_id is required for action='submit'");
 						if (!args.field_values) throw new Error("field_values is required for action='submit'");
-						const performAs = process.env.LEVER_DEFAULT_USER_ID;
+						const performAs = await resolvePerformAs(getSharedResolver(client));
 						const result = await client.submitFeedback(
 							args.opportunity_id,
 							args.base_template_id,

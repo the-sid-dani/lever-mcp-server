@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "./lever/client.js";
 import type { LeverInterview, LeverPanel, LeverOpportunity } from "./types/lever.js";
 import { mapLimit } from "./utils/concurrency.js";
+import { getSharedResolver, resolvePerformAs } from "./auth/resolve-perform-as.js";
 
 /**
  * Register interview-related tools with the MCP server
@@ -300,19 +301,6 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
           };
         }
 
-        if ((args.action === "schedule" || args.action === "reschedule" || args.action === "cancel") && !args.perform_as) {
-          return {
-            content: [{
-              type: "text",
-              text: JSON.stringify({
-                error: "perform_as parameter is required for create/update/delete operations",
-                action: args.action,
-                hint: "Provide the user ID who is performing this action"
-              }, null, 2)
-            }]
-          };
-        }
-
         let result: any = null;
 
         switch (args.action) {
@@ -339,7 +327,8 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
               }]
             };
             
-            result = await client.createPanel(args.opportunity_id!, panelData, args.perform_as);
+            const performAs = await resolvePerformAs(getSharedResolver(client), args.perform_as);
+            result = await client.createPanel(args.opportunity_id!, panelData, performAs);
             break;
           }
 
@@ -353,25 +342,27 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
               date: new Date(args.reschedule_data.new_date).getTime()
             };
             
+            const performAs = await resolvePerformAs(getSharedResolver(client), args.perform_as);
             result = await client.updateInterview(
               args.opportunity_id!,
               args.interview_id,
               updateData,
-              args.perform_as
+              performAs
             );
             break;
           }
 
-          case "cancel":
+          case "cancel": {
             if (!args.interview_id) {
               throw new Error("interview_id required for cancellation");
             }
             
             // Delete the interview
+            const performAs = await resolvePerformAs(getSharedResolver(client), args.perform_as);
             await client.deleteInterview(
               args.opportunity_id!,
               args.interview_id,
-              args.perform_as
+              performAs
             );
             
             result = {
@@ -381,6 +372,7 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
               reason: args.cancel_reason
             };
             break;
+          }
 
           case "check_availability":
             // This would require calendar integration which Lever API doesn't provide

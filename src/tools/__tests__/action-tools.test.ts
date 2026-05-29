@@ -11,6 +11,7 @@ import { registerUserTools } from '../users.js';
 import { registerCandidateTools } from '../candidates.js';
 import { registerSearchTools as registerAdvancedSearchTools } from '../../tools.js';
 import { registerInterviewTools } from '../../interview-tools.js';
+import { __resetSharedResolver } from '../../auth/resolve-perform-as.js';
 
 // A tiny fake McpServer that captures (name, schema, handler) registrations.
 type Handler = (args: any) => Promise<{ content: Array<{ type: string; text: string }> }>;
@@ -95,6 +96,13 @@ describe('lever_feedback action dispatch', () => {
 		const fake = makeFakeServer();
 		registry = fake.registry;
 		registerFeedbackTools(fake.server, client as LeverClient);
+		// resolvePerformAs (OAUTH disabled in test env) needs a default user.
+		process.env.LEVER_DEFAULT_USER_ID = "test-default-user";
+		__resetSharedResolver();
+	});
+
+	afterEach(() => {
+		delete process.env.LEVER_DEFAULT_USER_ID;
 	});
 
 	it("action='list_templates' routes to client.getFeedbackTemplates", async () => {
@@ -203,6 +211,13 @@ describe('lever_archive action dispatch', () => {
 		const fake = makeFakeServer();
 		registry = fake.registry;
 		registerArchiveTools(fake.server, client as LeverClient);
+		// resolvePerformAs (OAUTH disabled in test env) needs a default user.
+		process.env.LEVER_DEFAULT_USER_ID = "test-default-user";
+		__resetSharedResolver();
+	});
+
+	afterEach(() => {
+		delete process.env.LEVER_DEFAULT_USER_ID;
 	});
 
 	it("action='list_reasons' routes to client.getArchiveReasons", async () => {

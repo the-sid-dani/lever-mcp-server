@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "../lever/client.js";
+import { getSharedResolver, resolvePerformAs } from "../auth/resolve-perform-as.js";
 
 export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// List files for a candidate
@@ -178,11 +179,18 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 					}
 				}
 
+				// Resolve perform_as ONLY if there is a write to perform (avoid throwing
+				// on a no-op call). Every write below must attach perform_as or Lever 400s.
+				const hasWrite = !!(args.stage_id || args.add_tags?.length || args.remove_tags?.length);
+				const performAs = hasWrite
+					? await resolvePerformAs(getSharedResolver(client))
+					: undefined;
+
 				// Perform updates
 				const results = [];
 
 				if (args.stage_id) {
-					await client.updateOpportunityStage(args.opportunity_id, args.stage_id);
+					await client.updateOpportunityStage(args.opportunity_id, args.stage_id, performAs);
 					results.push({ action: "stage_updated", stage_id: args.stage_id });
 				}
 
@@ -195,10 +203,10 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 				if (args.add_tags || args.remove_tags) {
 					// Handle tag updates
 					if (args.add_tags && args.add_tags.length > 0) {
-						await client.addCandidateTags(args.opportunity_id, args.add_tags);
+						await client.addCandidateTags(args.opportunity_id, args.add_tags, performAs);
 					}
 					if (args.remove_tags && args.remove_tags.length > 0) {
-						await client.removeCandidateTags(args.opportunity_id, args.remove_tags);
+						await client.removeCandidateTags(args.opportunity_id, args.remove_tags, performAs);
 					}
 					results.push({
 						action: "tags_updated",

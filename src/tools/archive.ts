@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "../lever/client.js";
+import { getSharedResolver, resolvePerformAs } from "../auth/resolve-perform-as.js";
 import { formatOpportunity } from "./formatters.js";
 import { mapLimit } from "../utils/concurrency.js";
 
@@ -74,11 +75,15 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 							};
 						}
 
+						// Resolve perform_as per auth policy. args.perform_as is the explicit
+						// override, honored only on the OAUTH-disabled path.
+						const performAs = await resolvePerformAs(getSharedResolver(client), args.perform_as);
+
 						// Archive the candidate
 						await client.archiveOpportunity(
 							args.opportunity_id,
 							args.archive_reason_id,
-							args.perform_as,
+							performAs,
 							args.clean_interviews ?? false,
 							args.requisition_id,
 						);
@@ -92,7 +97,7 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 								clean_interviews: args.clean_interviews ?? false,
 								requisition_id: args.requisition_id || null,
 							},
-							performed_by: args.perform_as || "API User",
+							performed_by: performAs,
 							timestamp: new Date().toISOString(),
 							note: "Candidate has been archived and removed from active pipeline",
 						};
