@@ -122,4 +122,50 @@ describe('LeverClient makeRequest', () => {
 		// Initial attempt + 2 retries (retryCount < 2) = 3 fetch calls.
 		expect(fetchSpy).toHaveBeenCalledTimes(3);
 	}, 15_000);
+
+	// W4: a 4xx response carrying Lever's {code, message} must surface that
+	// diagnostic text in the thrown error (non-PII, high-signal). Lever returns
+	// e.g. {code:'BadRequestError', message:'posting is not expandable'}.
+	it('W4: a 400 with a Lever {code,message} body surfaces the message in the error', async () => {
+		const client = new LeverClient('test-key');
+		fetchSpy.mockResolvedValueOnce({
+			ok: false,
+			status: 400,
+			headers: { get: () => null },
+			json: async () => ({ code: 'BadRequestError', message: 'posting is not expandable' }),
+		} as any);
+
+		let message = '';
+		try {
+			await client.getStages();
+		} catch (e) {
+			message = (e as Error).message;
+		}
+		expect(message).toContain('400');
+		expect(message).toContain('posting is not expandable');
+		expect(message).toContain('BadRequestError');
+	});
+
+	// W4 (guard): a 400 whose body is non-JSON (json() throws) must still throw
+	// the bare `Lever API error: 400` without crashing on the parse failure.
+	it('W4: a 400 with a non-JSON body falls back to the bare error without crashing', async () => {
+		const client = new LeverClient('test-key');
+		fetchSpy.mockResolvedValueOnce({
+			ok: false,
+			status: 400,
+			headers: { get: () => null },
+			json: async () => {
+				throw new SyntaxError('Unexpected end of JSON input');
+			},
+		} as any);
+
+		let message = '';
+		try {
+			await client.getStages();
+		} catch (e) {
+			message = (e as Error).message;
+		}
+		expect(message).toContain('Lever API error: 400');
+		expect(message).toContain('/stages');
+	});
 });

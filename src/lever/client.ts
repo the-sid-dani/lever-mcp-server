@@ -54,6 +54,19 @@ class TokenBucket {
 	}
 }
 
+// W5: valid expand values for GET /opportunities. Lever 400s on anything else
+// (e.g. "posting" -> "posting is not expandable"). We STRIP invalid values
+// rather than throw, so a caller passing an unsupported expand degrades
+// gracefully instead of failing the whole request.
+export const VALID_OPPORTUNITY_EXPANDS = [
+	"owner",
+	"applications",
+	"stage",
+	"contact",
+	"followers",
+	"sourcedBy",
+] as const;
+
 export class LeverClient {
 	private baseUrl = "https://api.lever.co/v1";
 	private requestQueue: Promise<unknown> = Promise.resolve();
@@ -156,6 +169,35 @@ export class LeverClient {
 						logger.error(`Lever API 404: Resource not found at ${endpoint}`);
 					}
 					
+					// W4: for 4xx (NOT 429 — handled above, NOT 5xx — retried above),
+					// surface Lever's {code, message} which is non-PII + high-diagnostic
+					// (e.g. "posting is not expandable", "Missing required parameter:
+					// perform_as"). Guard the body read: it may be empty/non-JSON, in
+					// which case we fall back to the bare status+endpoint message. Only
+					// Lever's own code/message strings are appended — never candidate data.
+					if (response.status >= 400 && response.status < 500) {
+						try {
+							const errBody = await response.json();
+							const code = typeof (errBody as { code?: unknown })?.code === "string"
+								? (errBody as { code: string }).code
+								: undefined;
+							const message = typeof (errBody as { message?: unknown })?.message === "string"
+								? (errBody as { message: string }).message
+								: undefined;
+							if (message) {
+								throw new Error(
+									`Lever API error: ${response.status} on ${endpoint}: ${code ? code + " - " : ""}${message}`,
+								);
+							}
+						} catch (parseError) {
+							// Re-throw our own enriched error; swallow only JSON-parse failures.
+							if (parseError instanceof Error && parseError.message.startsWith("Lever API error:")) {
+								throw parseError;
+							}
+							// Empty/non-JSON body — fall through to the bare message below.
+						}
+					}
+					
 					throw new Error(`Lever API error: ${response.status} on ${endpoint}`);
 				}
 
@@ -215,8 +257,21 @@ export class LeverClient {
 		expand?: string[];
 	}): Promise<LeverApiResponse<LeverOpportunity>> {
 		// Default expand to include owner so recruiter data is always available
-		const expand = params.expand || ["owner"];
+		const requestedExpand = params.expand || ["owner"];
 		const { expand: _ignored, ...restParams } = params;
+
+		// W5: strip any expand value not on the /opportunities allowlist. Be
+		// lenient — log a debug warning for stripped values rather than throwing,
+		// so a caller passing an unsupported value (e.g. "posting") degrades
+		// gracefully instead of reintroducing the 400 ("posting is not expandable").
+		const validSet = new Set<string>(VALID_OPPORTUNITY_EXPANDS);
+		const expand = requestedExpand.filter((value) => {
+			if (validSet.has(value)) {
+				return true;
+			}
+			logger.debug(`getOpportunities: stripping invalid expand value "${value}" (not in allowlist)`);
+			return false;
+		});
 
 		const response = await this.makeRequest<LeverApiResponse<LeverOpportunity>>(
 			"GET",
@@ -511,16 +566,13 @@ export class LeverClient {
 		tags: string[],
 		performAs?: string
 	): Promise<{ data: LeverOpportunity }> {
-		const params: { perform_as?: string } = {};
-		if (performAs) {
-			params.perform_as = performAs;
-		}
-		
+		// W3: perform_as goes in the BODY (consistent with archiveOpportunity +
+		// updateOpportunityStage), not the query string. Pass undefined for params.
 		return this.makeRequest<{ data: LeverOpportunity }>(
 			"POST",
 			`/opportunities/${opportunityId}/addTags`,
-			params,
-			{ tags }
+			undefined,
+			{ tags, ...(performAs ? { perform_as: performAs } : {}) }
 		);
 	}
 
@@ -529,16 +581,13 @@ export class LeverClient {
 		tags: string[],
 		performAs?: string
 	): Promise<{ data: LeverOpportunity }> {
-		const params: { perform_as?: string } = {};
-		if (performAs) {
-			params.perform_as = performAs;
-		}
-		
+		// W3: perform_as goes in the BODY (consistent with archiveOpportunity +
+		// updateOpportunityStage), not the query string. Pass undefined for params.
 		return this.makeRequest<{ data: LeverOpportunity }>(
 			"POST",
 			`/opportunities/${opportunityId}/removeTags`,
-			params,
-			{ tags }
+			undefined,
+			{ tags, ...(performAs ? { perform_as: performAs } : {}) }
 		);
 	}
 

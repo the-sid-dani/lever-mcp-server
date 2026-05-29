@@ -373,3 +373,125 @@ describe('LeverClient getArchivedCandidates expand (VAL-510)', () => {
 		expect(url.searchParams.get('posting_id')).toBe('p1');
 	});
 });
+
+describe('LeverClient getOpportunities expand allowlist (W5)', () => {
+	let fetchSpy: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		fetchSpy = vi.fn();
+		vi.stubGlobal('fetch', fetchSpy);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	// W5: getOpportunities must STRIP expand values not on the /opportunities
+	// allowlist (e.g. "posting" 400s with "posting is not expandable"). A valid
+	// value like "owner" passes through; the invalid "posting" is dropped.
+	it('W5: strips invalid expand values, keeps valid ones', async () => {
+		const client = new LeverClient('test-key');
+		fetchSpy.mockResolvedValueOnce(
+			makeResponse({ ok: true, status: 200, json: { data: [] } }),
+		);
+
+		await client.getOpportunities({ expand: ['owner', 'posting'] });
+
+		const url = new URL(calledUrl(fetchSpy));
+		const expandValues = url.searchParams.getAll('expand');
+		expect(expandValues).toContain('owner');
+		expect(expandValues).not.toContain('posting');
+		expect(url.search).toContain('expand=owner');
+		expect(url.search).not.toContain('expand=posting');
+	});
+
+	// W5 (default): the default ["owner"] still passes through unfiltered.
+	it('W5: default expand owner passes the allowlist', async () => {
+		const client = new LeverClient('test-key');
+		fetchSpy.mockResolvedValueOnce(
+			makeResponse({ ok: true, status: 200, json: { data: [] } }),
+		);
+
+		await client.getOpportunities({});
+
+		const url = new URL(calledUrl(fetchSpy));
+		expect(url.searchParams.getAll('expand')).toEqual(['owner']);
+	});
+});
+
+describe('LeverClient tag writes perform_as in body (W3)', () => {
+	let fetchSpy: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		fetchSpy = vi.fn();
+		vi.stubGlobal('fetch', fetchSpy);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	function sentBody(n = 0): any {
+		const init = calledInit(fetchSpy, n);
+		return init.body ? JSON.parse(init.body) : undefined;
+	}
+
+	// W3: perform_as must travel in the BODY (consistent with archive/stage
+	// writes), NOT the query string.
+	it('W3: addCandidateTags puts perform_as in the body, not the query string', async () => {
+		const client = new LeverClient('test-key');
+		fetchSpy.mockResolvedValueOnce(
+			makeResponse({ ok: true, status: 200, json: { data: { id: 'opp-1' } } }),
+		);
+
+		await client.addCandidateTags('opp-1', ['x'], 'user-9');
+
+		const url = new URL(calledUrl(fetchSpy));
+		expect(url.origin + url.pathname).toBe(
+			'https://api.lever.co/v1/opportunities/opp-1/addTags',
+		);
+		expect(calledInit(fetchSpy).method).toBe('POST');
+		// perform_as is NOT a query param anymore.
+		expect(url.searchParams.get('perform_as')).toBeNull();
+		// perform_as IS in the body alongside tags.
+		const body = sentBody();
+		expect(body.tags).toEqual(['x']);
+		expect(body.perform_as).toBe('user-9');
+	});
+
+	it('W3: removeCandidateTags puts perform_as in the body, not the query string', async () => {
+		const client = new LeverClient('test-key');
+		fetchSpy.mockResolvedValueOnce(
+			makeResponse({ ok: true, status: 200, json: { data: { id: 'opp-1' } } }),
+		);
+
+		await client.removeCandidateTags('opp-1', ['y'], 'user-9');
+
+		const url = new URL(calledUrl(fetchSpy));
+		expect(url.origin + url.pathname).toBe(
+			'https://api.lever.co/v1/opportunities/opp-1/removeTags',
+		);
+		expect(url.searchParams.get('perform_as')).toBeNull();
+		const body = sentBody();
+		expect(body.tags).toEqual(['y']);
+		expect(body.perform_as).toBe('user-9');
+	});
+
+	// W3 (no performAs): when performAs is omitted, the body carries only tags.
+	it('W3: addCandidateTags without performAs sends only tags in the body', async () => {
+		const client = new LeverClient('test-key');
+		fetchSpy.mockResolvedValueOnce(
+			makeResponse({ ok: true, status: 200, json: { data: { id: 'opp-1' } } }),
+		);
+
+		await client.addCandidateTags('opp-1', ['z']);
+
+		const body = sentBody();
+		expect(body.tags).toEqual(['z']);
+		expect(body.perform_as).toBeUndefined();
+	});
+});
