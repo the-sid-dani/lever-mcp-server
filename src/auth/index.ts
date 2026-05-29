@@ -11,3 +11,6 @@ export {
 	FirestoreTokenStore,
 } from './token-store.js';
 export type { TokenStore, StoredToken, StoredClient } from './token-store.js';
+export { runWithRequestContext, getRequestEmail } from './request-context.js';
+export type { RequestContext } from './request-context.js';
+export { PerformAsResolver, PerformAsUnresolvedError } from './perform-as-resolver.js';

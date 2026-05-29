@@ -19,6 +19,7 @@ import {
 	isOAuthEnabled,
 	GoogleOAuthBroker,
 	createTokenStore,
+	runWithRequestContext,
 } from "./auth/index.js";
 import { logger } from "./utils/logger.js";
 
@@ -219,6 +220,7 @@ function getResourceMetadataUrl(req: Request): string {
 // MCP endpoint - handles all MCP protocol messages
 app.all("/mcp", async (req: Request, res: Response) => {
 	// OAuth authentication check (when enabled) - via the Google OAuth broker.
+	let authedEmail: string | undefined;
 	if (isOAuthEnabled() && broker) {
 		const authHeader = req.headers.authorization;
 		const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
@@ -232,6 +234,7 @@ app.all("/mcp", async (req: Request, res: Response) => {
 		}
 		try {
 			const authInfo = await broker.verifyAccessToken(token);
+			authedEmail = authInfo.extra?.email as string | undefined;
 			// Audit trail: emit a non-PII line at info; the raw email (PII) is
 			// gated behind debug so it is suppressed at the default level.
 			logger.info("[MCP] authenticated request");
@@ -277,7 +280,9 @@ app.all("/mcp", async (req: Request, res: Response) => {
 
 	// Handle the request
 	try {
-		await transport.handleRequest(req, res, req.body);
+		await runWithRequestContext({ email: authedEmail }, () =>
+			transport.handleRequest(req, res, req.body),
+		);
 
 		// AFTER handleRequest, transport.sessionId is populated (lazy getter
 		// resolves during handling). Capture + store for session reuse.
