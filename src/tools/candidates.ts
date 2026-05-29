@@ -6,6 +6,7 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// List files for a candidate
 	server.tool(
 		"lever_list_files",
+		"List all files and resumes attached to a candidate, with filename, type, size, and download URL.",
 		{
 			opportunity_id: z.string(),
 		},
@@ -91,6 +92,7 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// List applications for a candidate
 	server.tool(
 		"lever_list_applications",
+		"List the job applications tied to a candidate, including posting, status, and creation date.",
 		{
 			opportunity_id: z.string(),
 		},
@@ -150,6 +152,7 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// Consolidated update tool for stage, owner, and tags
 	server.tool(
 		"lever_update_candidate",
+		"Update a candidate: move stage (by ID or name), add or remove tags; owner reassignment is not yet implemented.",
 		{
 			opportunity_id: z.string().describe("The candidate's opportunity ID"),
 			stage_id: z.string().optional().describe("Move to this stage ID"),
@@ -239,6 +242,7 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 	// lever_list_emails — VAL-019 (M1.7) — read email thread history for a candidate
 	server.tool(
 		"lever_list_emails",
+		"List the email thread history logged on a candidate, including subject, participants, body, and timestamps.",
 		{
 			opportunity_id: z.string().describe("Opportunity ID to list emails for"),
 			limit: z.number().default(100).describe("Max emails per request (Lever max 100)"),

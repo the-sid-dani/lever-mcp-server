@@ -10,6 +10,7 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
   // Tool 1: Get Interview Insights
   server.tool(
     "lever_get_interview_insights",
+    "View scheduled or completed interviews for a candidate (opportunity_id) with dashboard, detailed, analytics, or preparation views; note the interviewer_email path is a client-side fan-out (paginate opportunities, fetch each one's interviews, filter by interviewer) since Lever has no server-side interviewer filter, so it is not an exact or fast server-side lookup.",
     {
       // WHO - Flexible targeting
       owner_email: z.string().optional().describe("Get interviews for specific posting owner"),
@@ -127,6 +128,7 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
   // Tool 2: Manage Interview
   server.tool(
     "lever_manage_interview",
+    "Schedule, reschedule, or cancel a candidate interview (creates within a panel); a perform_as user ID is required for any modifying action.",
     {
       action: z.enum(["schedule", "reschedule", "cancel", "update_outcome", "bulk_schedule", "check_availability"]),
       

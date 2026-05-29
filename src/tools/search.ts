@@ -9,6 +9,7 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 	// Basic search tool
 	server.tool(
 		"lever_search_candidates",
+		"Search candidates by name or email; an email query is an exact server-side match (fast, one call), while a name query scans the full candidate base client-side (Lever has no server-side name filter) so it is complete but slower; check the response coverage object.",
 		{
 			query: z.string().optional().describe("Search query for name or email"),
 			stage_name: z.string().optional().describe("Stage name (not ID)"),

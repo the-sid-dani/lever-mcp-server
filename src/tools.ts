@@ -76,7 +76,7 @@ export function registerAllTools(server: McpServer, apiKey: string): void {
 export function registerSearchTools(server: McpServer, client: LeverClient): void {
 	server.tool(
 		"lever_advanced_search",
-		"Search for candidates with advanced filters including company, skills, location, stage, and tags",
+		"Filter candidates by company, skills, location, stage, or tags; pass email for an exact server-side match, otherwise it scans the full base client-side (slower) and reports a coverage object.",
 		{
 			companies: z.string().optional().describe("Comma-separated company names"),
 			skills: z.string().optional().describe("Comma-separated skills to search for"),
@@ -223,7 +223,7 @@ export function registerSearchTools(server: McpServer, client: LeverClient): voi
 function registerCandidateTools(server: McpServer, client: LeverClient): void {
 	server.tool(
 		"lever_get_candidate",
-		"Get detailed information about a specific candidate",
+		"Fetch full details for one candidate by their opportunity ID.",
 		{
 			opportunity_id: z.string().describe("The opportunity/candidate ID"),
 		},
@@ -268,7 +268,7 @@ function registerCandidateTools(server: McpServer, client: LeverClient): void {
 function registerUtilityTools(server: McpServer, client: LeverClient): void {
 	server.tool(
 		"lever_list_open_roles",
-		"List all open job postings",
+		"List every published (open) job posting, optionally expanded with owner and hiring-manager details.",
 		{
 			expand_owners: z.boolean().default(true).describe("Include posting owner and hiring manager details"),
 		},
@@ -319,7 +319,7 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 
 	server.tool(
 		"lever_find_postings_by_owner",
-		"Find job postings by owner name or ID",
+		"Find job postings owned by a given user, looked up by owner name (partial match) or owner ID.",
 		{
 			owner_name: z.string().optional().describe("Name of the posting owner (partial match)"),
 			owner_id: z.string().optional().describe("Owner ID"),

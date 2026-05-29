@@ -6,6 +6,7 @@ export function registerUserTools(server: McpServer, client: LeverClient) {
 	// Get Lever users (recruiters, hiring managers, etc.) — ported from dead index.ts 2026-05-26
 	server.tool(
 		"lever_get_users",
+		"List Lever users (recruiters, hiring managers, interviewers) with their names, emails, and IDs; paginates the full directory.",
 		{
 			limit: z.number().default(100).describe("Maximum number of users to return (max 100)"),
 			include_deactivated: z.boolean().default(false).describe("Include deactivated users"),
