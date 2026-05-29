@@ -297,3 +297,34 @@ describe('LeverClient error path', () => {
 		expect(message).not.toContain('SECRET_PII_LEAK_BODY');
 	});
 });
+
+describe('LeverClient getPostingsByOwner pagination (VAL-103)', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('paginates ALL pages (no maxBatches cap) until hasNext is false', async () => {
+		const client = new LeverClient('test-key');
+
+		// Spy on the instance method getPostings to drive pagination without network.
+		const getPostingsSpy = vi
+			.spyOn(client, 'getPostings')
+			.mockResolvedValueOnce({
+				data: [{ id: 'p1', owner: { name: 'Sid Dani' } }],
+				hasNext: true,
+				next: 'o2',
+			} as any)
+			.mockResolvedValueOnce({
+				data: [{ id: 'p2', owner: { name: 'Sid Dani' } }],
+				hasNext: false,
+			} as any);
+
+		const res = await client.getPostingsByOwner('Sid');
+
+		// Two pages fetched proves the 5-batch (500-posting) cap is gone.
+		expect(getPostingsSpy).toHaveBeenCalledTimes(2);
+		expect(res.data.length).toBe(2);
+		expect(res.data[0]!.id).toBe('p1');
+		expect(res.data[1]!.id).toBe('p2');
+	});
+});

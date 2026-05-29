@@ -7,6 +7,7 @@ import { registerStageTools } from '../stages.js';
 import { registerArchiveTools } from '../archive.js';
 import { registerRequisitionTools } from '../requisitions.js';
 import { registerSearchTools } from '../search.js';
+import { registerSearchTools as registerAdvancedSearchTools } from '../../tools.js';
 
 // A tiny fake McpServer that captures (name, schema, handler) registrations.
 type Handler = (args: any) => Promise<{ content: Array<{ type: string; text: string }> }>;
@@ -325,5 +326,45 @@ describe('lever_search_candidates name-sweep coverage (VAL-102)', () => {
 		expect(payload.total_matches).toBe(2);
 		expect(payload.coverage.complete).toBe(true);
 		expect(payload.coverage.pages_scanned).toBe(2);
+	});
+});
+
+describe('lever_advanced_search full pagination (VAL-103)', () => {
+	// tools.ts registerSearchTools registers lever_advanced_search with the
+	// 4-arg overload (name, description, schema, handler), so the standard
+	// makeFakeServer (which captures arg positions 0,1,2,3) works directly.
+
+	it('sweeps every page to hasNext:false and reports complete coverage', async () => {
+		const client: any = {
+			getOpportunities: vi
+				.fn()
+				.mockResolvedValueOnce({
+					data: [{ id: 'a', name: 'Jane Smith' }],
+					hasNext: true,
+					next: 'off2',
+				})
+				.mockResolvedValueOnce({
+					data: [{ id: 'b', name: 'Jane Doe' }],
+					hasNext: false,
+				}),
+		};
+		const fake = makeFakeServer();
+		registerAdvancedSearchTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_advanced_search')!;
+		const res = await handler({
+			limit: 50,
+			page: 1,
+			mode: 'comprehensive',
+			archived: false,
+		});
+
+		// Full sweep across both pages proves the maxFetch ceiling is gone.
+		expect(client.getOpportunities).toHaveBeenCalledTimes(2);
+		const payload = parsePayload(res);
+		expect(payload.total_matches).toBe(2);
+		expect(payload.coverage.complete).toBe(true);
+		expect(payload.coverage.pages_scanned).toBe(2);
+		expect(payload.coverage.records_scanned).toBe(2);
 	});
 });

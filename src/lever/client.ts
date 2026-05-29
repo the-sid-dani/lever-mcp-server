@@ -435,27 +435,28 @@ export class LeverClient {
 
 	// Add method to find postings by owner name
 	async getPostingsByOwner(ownerName: string, state: string = "published"): Promise<LeverApiResponse<LeverPosting>> {
-		// Fetch more postings to ensure we don't miss any (but not ALL)
+		// VAL-103: paginate ALL postings (no self-imposed batch cap) so no role
+		// is silently dropped. The client token bucket serializes requests +
+		// handles 429 backoff, so sequential awaits here are correct.
 		const allPostings: LeverPosting[] = [];
 		let offset: string | undefined;
 		let batchesFetched = 0;
-		const maxBatches = 5; // Fetch up to 500 postings (5 batches of 100)
-		
-		// Fetch multiple batches to increase coverage
-		while (batchesFetched < maxBatches) {
+
+		// Fetch every page until the API reports no further pages.
+		while (true) {
 			const response = await this.getPostings(state, 100, offset, ["owner", "hiringManager"]);
-			
+
 			if (response.data && response.data.length > 0) {
 				allPostings.push(...response.data);
 			}
-			
+
 			batchesFetched++;
-			
+
 			// Stop if no more data
 			if (!response.hasNext || !response.next) {
 				break;
 			}
-			
+
 			offset = response.next;
 		}
 		
