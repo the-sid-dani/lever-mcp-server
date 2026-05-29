@@ -18,7 +18,9 @@ import {
 	validateOAuthConfig,
 	isOAuthEnabled,
 	GoogleOAuthBroker,
+	createTokenStore,
 } from "./auth/index.js";
+import { logger } from "./utils/logger.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -85,6 +87,7 @@ if (isOAuthEnabled()) {
 		googleRedirectUri,
 		hostedDomain: OAUTH_CONFIG.hostedDomain,
 		mcpPublicUrl,
+		store: createTokenStore(),
 	});
 
 	// Serve standard MCP AS endpoints at the application root:
@@ -229,8 +232,10 @@ app.all("/mcp", async (req: Request, res: Response) => {
 		}
 		try {
 			const authInfo = await broker.verifyAccessToken(token);
-			// Log authenticated user for audit trail. Email lives in extra.email.
-			console.log(`[MCP] Authenticated user: ${authInfo.extra?.email}`);
+			// Audit trail: emit a non-PII line at info; the raw email (PII) is
+			// gated behind debug so it is suppressed at the default level.
+			logger.info("[MCP] authenticated request");
+			logger.debug(`[MCP] authenticated user: ${authInfo.extra?.email}`);
 		} catch (e) {
 			const resourceMetadataUrl = getResourceMetadataUrl(req);
 			res
@@ -284,14 +289,14 @@ app.all("/mcp", async (req: Request, res: Response) => {
 				// Clean up on close
 				transport.onclose = () => {
 					transports.delete(newSessionId);
-					console.log(`[MCP] Session closed: ${newSessionId}`);
+					logger.debug(`[MCP] Session closed: ${newSessionId}`);
 				};
 
-				console.log(`[MCP] New session: ${newSessionId}`);
+				logger.debug(`[MCP] New session: ${newSessionId}`);
 			}
 		}
 	} catch (error) {
-		console.error("[MCP] Error handling request:", error);
+		logger.error(`[MCP] Error handling request: ${(error as Error)?.message ?? "unknown"}`);
 		if (!res.headersSent) {
 			res.status(500).json({ error: "Internal server error" });
 		}

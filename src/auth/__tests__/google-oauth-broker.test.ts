@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Response } from 'express';
 import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { GoogleOAuthBroker } from '../google-oauth-broker.js';
+import { InMemoryTokenStore } from '../token-store.js';
 import type { GoogleClaims } from '../google-verifier.js';
 
 const BASE_OPTS = {
@@ -32,8 +33,9 @@ function makeFakeVerifier(result: GoogleClaims | null) {
 
 function makeBroker(verifierResult: GoogleClaims | null = SAMBA_CLAIMS) {
   const verifier = makeFakeVerifier(verifierResult);
-  const broker = new GoogleOAuthBroker({ ...BASE_OPTS, verifier: verifier as any });
-  return { broker, verifier };
+  const store = new InMemoryTokenStore();
+  const broker = new GoogleOAuthBroker({ ...BASE_OPTS, verifier: verifier as any, store });
+  return { broker, verifier, store };
 }
 
 // Minimal full client info (SDK assigns client_id before passing to registerClient).
@@ -300,7 +302,7 @@ describe('GoogleOAuthBroker token exchange + verification', () => {
     expect(authInfo.scopes).toEqual(['openid', 'email']);
     expect(authInfo.extra?.email).toBe('sid@samba.tv');
 
-    expect(broker.getEmailForToken(tokens.access_token)).toBe('sid@samba.tv');
+    expect(await broker.getEmailForToken(tokens.access_token)).toBe('sid@samba.tv');
   });
 
   it('exchangeAuthorizationCode is one-time use', async () => {
@@ -340,7 +342,7 @@ describe('GoogleOAuthBroker token exchange + verification', () => {
 
     await expect(broker.verifyAccessToken(tokens.access_token)).rejects.toThrow();
     // Evicted: still throws (and email lookup gone).
-    expect(broker.getEmailForToken(tokens.access_token)).toBeUndefined();
+    expect(await broker.getEmailForToken(tokens.access_token)).toBeUndefined();
     vi.restoreAllMocks();
   });
 

@@ -9,8 +9,9 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { LeverClient } from "./lever/client.js";
 import type { LeverOpportunity, LeverPosting } from "./types/lever.js";
-import { registerAdditionalTools, formatOpportunity } from "./additional-tools.js";
+import { registerAdditionalTools } from "./additional-tools.js";
 import { registerInterviewTools } from "./interview-tools.js";
+import { formatOpportunity, formatPosting } from "./tools/formatters.js";
 import { resolveStageIdentifier } from "./utils/stage-helpers.js";
 
 // MCP Tool Response type - needs index signature for SDK compatibility
@@ -36,42 +37,6 @@ function getSharedClient(apiKey: string): LeverClient {
 	return sharedClient;
 }
 
-// Helper to format posting data
-function formatPosting(posting: LeverPosting): Record<string, unknown> {
-	const location = posting.categories?.location || "Unknown";
-	const team = posting.categories?.team || "Unknown";
-
-	let ownerName = "Unassigned";
-	let ownerId = "";
-	if (typeof posting.owner === "object" && posting.owner) {
-		ownerName = posting.owner.name || "Unknown";
-		ownerId = posting.owner.id || "";
-	} else if (typeof posting.owner === "string") {
-		ownerId = posting.owner;
-		ownerName = `User ID: ${posting.owner}`;
-	}
-
-	let hiringManagerName = "Unassigned";
-	let hiringManagerId = "";
-	if (typeof posting.hiringManager === "object" && posting.hiringManager) {
-		hiringManagerName = posting.hiringManager.name || "Unknown";
-		hiringManagerId = posting.hiringManager.id || "";
-	} else if (typeof posting.hiringManager === "string") {
-		hiringManagerId = posting.hiringManager;
-		hiringManagerName = `User ID: ${posting.hiringManager}`;
-	}
-
-	return {
-		id: posting.id || "",
-		title: posting.text || "Unknown",
-		state: posting.state || "Unknown",
-		location,
-		team,
-		posting_owner: { id: ownerId, name: ownerName },
-		hiring_manager: { id: hiringManagerId, name: hiringManagerName },
-		url: posting.urls?.show || "",
-	};
-}
 
 // Tracing wrapper for tool execution
 function trace(toolName: string, message: string, data?: unknown) {

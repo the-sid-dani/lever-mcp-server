@@ -12,6 +12,7 @@ import type {
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { GoogleWorkspaceVerifier, type GoogleClaims } from './google-verifier.js';
+import { InMemoryTokenStore, type TokenStore } from './token-store.js';
 
 /**
  * Google OAuth broker - implements the MCP SDK OAuthServerProvider interface.
@@ -29,10 +30,11 @@ import { GoogleWorkspaceVerifier, type GoogleClaims } from './google-verifier.js
  * enforce the hosted-domain restriction (hd claim) on Google's returned ID token,
  * and mint our own opaque access tokens scoped to the validated user email.
  *
- * Storage is in-memory and per-instance. Under Cloud Run autoscaling a restart
- * or scale-out invalidates active sessions; affected clients re-run the OAuth
- * flow (one click in Claude.ai). Acceptable for an internal server; swap to a
- * shared store if multi-instance session continuity becomes a requirement.
+ * Durable state (minted access tokens + DCR client registrations) lives in an
+ * injected TokenStore (in-memory by default; Firestore in prod), so it survives
+ * Cloud Run deploys/restarts. Transient state (authCodes + pendingAuth, <=5min
+ * TTL) stays in per-instance memory - a mid-flow restart is rare and the user
+ * just re-runs the one-click OAuth flow.
  *
  * Ported from the MSCI MCP GoogleOAuthBroker (Python / mcp.server.auth).
  */
@@ -66,6 +68,8 @@ export interface GoogleOAuthBrokerOptions {
   mcpPublicUrl: string;
   /** Optional injected verifier; defaults to a GoogleWorkspaceVerifier. */
   verifier?: VerifierLike;
+  /** Durable store for access tokens + DCR clients. Defaults to in-memory. */
+  store?: TokenStore;
 }
 
 /** A pending MCP authorization request, stashed across the Google round-trip. */
@@ -90,15 +94,6 @@ interface StoredAuthCode {
   expiresAt: number; // ms epoch
 }
 
-/** A minted opaque access token record. */
-interface StoredAccessToken {
-  token: string;
-  clientId: string;
-  scopes: string[];
-  expiresAt: number; // seconds epoch
-  email: string;
-}
-
 export class GoogleOAuthBroker implements OAuthServerProvider {
   private readonly googleClientId: string;
   private readonly googleClientSecret: string;
@@ -107,11 +102,15 @@ export class GoogleOAuthBroker implements OAuthServerProvider {
   private readonly mcpPublicUrl: string;
   private readonly verifier: VerifierLike;
 
-  // In-memory state (per instance - see class docstring).
-  private readonly clients = new Map<string, OAuthClientInformationFull>();
+  // Durable state (survives deploys/restarts via the injected store): access
+  // tokens + DCR client registrations.
+  private readonly store: TokenStore;
+
+  // Transient in-memory state (per instance). Short-lived (<=5min TTL); a
+  // mid-flow restart is rare and the SDK/user retry covers it - deliberately
+  // NOT persisted.
   private readonly pendingAuth = new Map<string, PendingAuth>();
   private readonly authCodes = new Map<string, StoredAuthCode>();
-  private readonly accessTokens = new Map<string, StoredAccessToken>();
 
   readonly skipLocalPkceValidation = false;
 
@@ -142,12 +141,16 @@ export class GoogleOAuthBroker implements OAuthServerProvider {
         googleClientId: options.googleClientId,
         hostedDomain: options.hostedDomain,
       });
+    this.store = options.store ?? new InMemoryTokenStore();
   }
 
   // ------------------------------------------------------------------ DCR
   get clientsStore(): OAuthRegisteredClientsStore {
     return {
-      getClient: (clientId: string) => this.clients.get(clientId),
+      getClient: async (clientId: string) => {
+        const stored = await this.store.getClient(clientId);
+        return (stored as OAuthClientInformationFull | null) ?? undefined;
+      },
       registerClient: async (
         client: Omit<OAuthClientInformationFull, 'client_id' | 'client_id_issued_at'>
       ) => {
@@ -156,7 +159,7 @@ export class GoogleOAuthBroker implements OAuthServerProvider {
         }
         // The SDK assigns client_id before calling registerClient; store as-is.
         const full = client as OAuthClientInformationFull;
-        this.clients.set(full.client_id, full);
+        await this.store.putClient(full as unknown as Parameters<TokenStore['putClient']>[0]);
         return full;
       },
     };
@@ -306,7 +309,7 @@ export class GoogleOAuthBroker implements OAuthServerProvider {
     this.authCodes.delete(authorizationCode);
 
     const token = newToken('at');
-    this.accessTokens.set(token, {
+    await this.store.putToken({
       token,
       clientId: client.client_id,
       scopes: code.scopes,
@@ -335,13 +338,11 @@ export class GoogleOAuthBroker implements OAuthServerProvider {
 
   // ------------------------------------------------- /mcp request token check
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const at = this.accessTokens.get(token);
+    // The store returns null for missing OR expired tokens (and evicts the
+    // expired record on read), preserving the prior invalid/expired semantics.
+    const at = await this.store.getToken(token);
     if (!at) {
       throw new Error('Invalid access token');
-    }
-    if (at.expiresAt < Math.floor(Date.now() / 1000)) {
-      this.accessTokens.delete(token);
-      throw new Error('Access token expired');
     }
     return {
       token: at.token,
@@ -357,12 +358,12 @@ export class GoogleOAuthBroker implements OAuthServerProvider {
     _client: OAuthClientInformationFull,
     request: OAuthTokenRevocationRequest
   ): Promise<void> {
-    this.accessTokens.delete(request.token);
+    await this.store.deleteToken(request.token);
   }
 
   // ----------------------------------------------------- Helpers (middleware)
   /** Resolve the email associated with an opaque access token, if live. */
-  getEmailForToken(token: string): string | undefined {
-    return this.accessTokens.get(token)?.email;
+  async getEmailForToken(token: string): Promise<string | undefined> {
+    return (await this.store.getToken(token))?.email;
   }
 }
