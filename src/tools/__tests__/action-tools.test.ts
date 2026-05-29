@@ -998,3 +998,44 @@ describe('VAL-505 archive exhaustive fan-out guard + interview window correctnes
 		expect(payload.metadata.total_count).toBe(0);
 	});
 });
+
+describe('lever_update_candidate owner_id fails loud (VAL-C03 W1)', () => {
+	// registerCandidateTools registers lever_update_candidate with the 4-arg
+	// overload (name, description, schema, handler), so the standard makeFakeServer
+	// captures (schema, handler) at positions 2,3.
+	let client: any;
+	let registry: Map<string, { schema: any; handler: Handler }>;
+
+	beforeEach(() => {
+		client = {
+			getStages: vi.fn(async () => ({ data: [{ id: 's1', text: 'Stage 1' }] })),
+			updateOpportunityStage: vi.fn(async () => ({ data: { id: 'opp-1' } })),
+			addCandidateTags: vi.fn(async () => ({ data: { id: 'opp-1' } })),
+			removeCandidateTags: vi.fn(async () => ({ data: { id: 'opp-1' } })),
+			getOpportunity: vi.fn(async () => ({ data: { id: 'opp-1', name: 'Jane' } })),
+		};
+		const fake = makeFakeServer();
+		registry = fake.registry;
+		registerCandidateTools(fake.server, client as LeverClient);
+		// resolvePerformAs (OAUTH disabled in test env) needs a default user.
+		process.env.LEVER_DEFAULT_USER_ID = 'test-default-user';
+		__resetSharedResolver();
+	});
+
+	afterEach(() => {
+		delete process.env.LEVER_DEFAULT_USER_ID;
+	});
+
+	it('owner_id returns an error response and does NOT call any stage/tag client method', async () => {
+		const { handler } = registry.get('lever_update_candidate')!;
+		const res = await handler({ opportunity_id: 'opp-1', owner_id: 'u-9' });
+
+		const payload = parsePayload(res);
+		expect(payload.error).toMatch(/not yet implemented/i);
+		// No success leakage and no write fired.
+		expect(payload.success).toBeUndefined();
+		expect(client.updateOpportunityStage).not.toHaveBeenCalled();
+		expect(client.addCandidateTags).not.toHaveBeenCalled();
+		expect(client.removeCandidateTags).not.toHaveBeenCalled();
+	});
+});

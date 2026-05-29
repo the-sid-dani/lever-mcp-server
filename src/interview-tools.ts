@@ -46,7 +46,15 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
           view_type: args.view_type,
           metadata: {
             generated_at: new Date().toISOString(),
-            filters_applied: args,
+            filters_applied: {
+              owner_email: args.owner_email,
+              posting_id: args.posting_id,
+              opportunity_id: args.opportunity_id,
+              interviewer_email: args.interviewer_email,
+              time_scope: args.time_scope,
+              view_type: args.view_type,
+              status_filter: args.status_filter
+            },
             total_count: 0
           },
           data: null
@@ -251,8 +259,7 @@ export function registerInterviewTools(server: McpServer, client: LeverClient) {
             type: "text",
             text: JSON.stringify({
               error: "Interview insights tool error",
-              message: error.message,
-              stack: error.stack
+              message: error.message
             }, null, 2)
           }]
         };

@@ -180,6 +180,12 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 					}
 				}
 
+				// owner reassignment is not yet implemented (no LeverClient method).
+				// Fail loud rather than returning a misleading success response.
+				if (args.owner_id) {
+					throw new Error("owner reassignment is not yet implemented (no LeverClient method)");
+				}
+
 				// Resolve perform_as ONLY if there is a write to perform (avoid throwing
 				// on a no-op call). Every write below must attach perform_as or Lever 400s.
 				const hasWrite = !!(args.stage_id || args.add_tags?.length || args.remove_tags?.length);
@@ -193,12 +199,6 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 				if (args.stage_id) {
 					await client.updateOpportunityStage(args.opportunity_id, args.stage_id, performAs);
 					results.push({ action: "stage_updated", stage_id: args.stage_id });
-				}
-
-				if (args.owner_id) {
-					// Note: This would need a new method in LeverClient
-					// await client.updateOpportunityOwner(args.opportunity_id, args.owner_id);
-					results.push({ action: "owner_updated", owner_id: args.owner_id, note: "Owner update not yet implemented in LeverClient" });
 				}
 
 				if (args.add_tags || args.remove_tags) {
