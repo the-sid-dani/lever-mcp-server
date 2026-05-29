@@ -13,6 +13,7 @@ import { registerAdditionalTools } from "./additional-tools.js";
 import { registerInterviewTools } from "./interview-tools.js";
 import { formatOpportunity, formatPosting } from "./tools/formatters.js";
 import { resolveStageIdentifier } from "./utils/stage-helpers.js";
+import { collectAllPages } from "./utils/paginate.js";
 
 // MCP Tool Response type - needs index signature for SDK compatibility
 interface McpToolResponse {
@@ -292,19 +293,9 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 				// VAL-103: paginate ALL published postings (no single-fetch cap)
 				// so no open role is silently dropped. Sequential awaits are
 				// correct -- the client token bucket handles rate limiting + 429s.
-				const allRoles: LeverPosting[] = [];
-				let offset: string | undefined;
-
-				while (true) {
-					const response = await client.getPostings("published", 100, offset, expandFields);
-
-					if (response.data && response.data.length > 0) {
-						allRoles.push(...response.data);
-					}
-
-					if (!response.hasNext || !response.next) break;
-					offset = response.next;
-				}
+				const { items: allRoles } = await collectAllPages<LeverPosting>(
+					(offset) => client.getPostings("published", 100, offset, expandFields),
+				);
 
 				return {
 					content: [{
@@ -359,19 +350,9 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 					// VAL-103: paginate ALL postings (no single-fetch cap) then
 					// filter by owner id, just like the owner_name path. Returns
 					// every match -- no slice truncation.
-					const allPostings: LeverPosting[] = [];
-					let offset: string | undefined;
-
-					while (true) {
-						const response = await client.getPostings(params.state, 100, offset, ["owner"]);
-
-						if (response.data && response.data.length > 0) {
-							allPostings.push(...response.data);
-						}
-
-						if (!response.hasNext || !response.next) break;
-						offset = response.next;
-					}
+					const { items: allPostings } = await collectAllPages<LeverPosting>(
+						(offset) => client.getPostings(params.state, 100, offset, ["owner"]),
+					);
 
 					postings = allPostings.filter((p: LeverPosting) => {
 						const ownerId = typeof p.owner === "object" ? p.owner?.id : p.owner;
