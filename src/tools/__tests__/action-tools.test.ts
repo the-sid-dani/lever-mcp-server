@@ -7,6 +7,8 @@ import { registerStageTools } from '../stages.js';
 import { registerArchiveTools } from '../archive.js';
 import { registerRequisitionTools } from '../requisitions.js';
 import { registerSearchTools } from '../search.js';
+import { registerUserTools } from '../users.js';
+import { registerCandidateTools } from '../candidates.js';
 import { registerSearchTools as registerAdvancedSearchTools } from '../../tools.js';
 
 // A tiny fake McpServer that captures (name, schema, handler) registrations.
@@ -366,5 +368,158 @@ describe('lever_advanced_search full pagination (VAL-103)', () => {
 		expect(payload.coverage.complete).toBe(true);
 		expect(payload.coverage.pages_scanned).toBe(2);
 		expect(payload.coverage.records_scanned).toBe(2);
+	});
+});
+
+describe('lever_notes action=list full pagination (VAL-105)', () => {
+	it('paginates to hasNext:false (cap removed) and accumulates across pages', async () => {
+		const client: any = {
+			getNotes: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'n1' }], hasNext: true, next: 'o2' })
+				.mockResolvedValueOnce({ data: [{ id: 'n2' }], hasNext: true, next: 'o3' })
+				.mockResolvedValueOnce({ data: [{ id: 'n3' }], hasNext: true, next: 'o4' })
+				.mockResolvedValueOnce({ data: [{ id: 'n4' }], hasNext: true, next: 'o5' })
+				.mockResolvedValueOnce({ data: [{ id: 'n5' }], hasNext: true, next: 'o6' })
+				.mockResolvedValueOnce({ data: [{ id: 'n6' }], hasNext: false }),
+		};
+		const fake = makeFakeServer();
+		registerNoteTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_notes')!;
+		const res = await handler({ action: 'list', opportunity_id: 'opp-1' });
+
+		// 6 pages > old maxBatches=5 cap -> proves the cap is gone.
+		expect(client.getNotes).toHaveBeenCalledTimes(6);
+		const payload = parsePayload(res);
+		expect(payload.count).toBe(6);
+		expect(payload.notes.map((n: any) => n.id)).toEqual(['n1', 'n2', 'n3', 'n4', 'n5', 'n6']);
+	});
+});
+
+describe('lever_feedback list actions full pagination (VAL-105)', () => {
+	it("action='list_templates' paginates to hasNext:false", async () => {
+		const client: any = {
+			getFeedbackTemplates: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 't1' }], hasNext: true, next: 'o2' })
+				.mockResolvedValueOnce({ data: [{ id: 't2' }], hasNext: true, next: 'o3' })
+				.mockResolvedValueOnce({ data: [{ id: 't3' }], hasNext: true, next: 'o4' })
+				.mockResolvedValueOnce({ data: [{ id: 't4' }], hasNext: true, next: 'o5' })
+				.mockResolvedValueOnce({ data: [{ id: 't5' }], hasNext: true, next: 'o6' })
+				.mockResolvedValueOnce({ data: [{ id: 't6' }], hasNext: false }),
+		};
+		const fake = makeFakeServer();
+		registerFeedbackTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_feedback')!;
+		const res = await handler({ action: 'list_templates' });
+
+		expect(client.getFeedbackTemplates).toHaveBeenCalledTimes(6);
+		const payload = parsePayload(res);
+		expect(payload.count).toBe(6);
+	});
+
+	it("action='list' paginates to hasNext:false", async () => {
+		const client: any = {
+			getOpportunityFeedback: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'fb1' }], hasNext: true, next: 'o2' })
+				.mockResolvedValueOnce({ data: [{ id: 'fb2' }], hasNext: true, next: 'o3' })
+				.mockResolvedValueOnce({ data: [{ id: 'fb3' }], hasNext: true, next: 'o4' })
+				.mockResolvedValueOnce({ data: [{ id: 'fb4' }], hasNext: true, next: 'o5' })
+				.mockResolvedValueOnce({ data: [{ id: 'fb5' }], hasNext: true, next: 'o6' })
+				.mockResolvedValueOnce({ data: [{ id: 'fb6' }], hasNext: false }),
+		};
+		const fake = makeFakeServer();
+		registerFeedbackTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_feedback')!;
+		const res = await handler({ action: 'list', opportunity_id: 'opp-1' });
+
+		expect(client.getOpportunityFeedback).toHaveBeenCalledTimes(6);
+		const payload = parsePayload(res);
+		expect(payload.count).toBe(6);
+	});
+});
+
+describe('lever_requisitions action=list full pagination (VAL-105)', () => {
+	it('paginates to hasNext:false (was single-call) and accumulates across pages', async () => {
+		const client: any = {
+			getRequisitions: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'r1', requisitionCode: 'ENG-1' }], hasNext: true, next: 'o2' })
+				.mockResolvedValueOnce({ data: [{ id: 'r2', requisitionCode: 'ENG-2' }], hasNext: false }),
+		};
+		const fake = makeFakeServer();
+		registerRequisitionTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_requisitions')!;
+		const res = await handler({ action: 'list' });
+
+		expect(client.getRequisitions).toHaveBeenCalledTimes(2);
+		const payload = parsePayload(res);
+		expect(payload.count).toBe(2);
+		expect(payload.requisitions.map((r: any) => r.lever_id)).toEqual(['r1', 'r2']);
+	});
+});
+
+describe('lever_get_users + lever_list_emails full pagination (VAL-105)', () => {
+	// Both register with the 3-arg overload (name, schema, handler) -- NO description.
+	// This local fake captures the LAST two args as (schema, handler) regardless of arity.
+	function makeArityFakeServer() {
+		const registry = new Map<string, { schema: any; handler: Handler }>();
+		const server = {
+			tool: (name: string, ...rest: any[]) => {
+				const handler = rest[rest.length - 1];
+				const schema = rest[rest.length - 2];
+				registry.set(name, { schema, handler });
+			},
+		} as unknown as McpServer;
+		return { server, registry };
+	}
+
+	it('lever_get_users paginates to hasNext:false (cap removed)', async () => {
+		const client: any = {
+			getUsers: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'u1' }], hasNext: true, next: 'o2' })
+				.mockResolvedValueOnce({ data: [{ id: 'u2' }], hasNext: true, next: 'o3' })
+				.mockResolvedValueOnce({ data: [{ id: 'u3' }], hasNext: true, next: 'o4' })
+				.mockResolvedValueOnce({ data: [{ id: 'u4' }], hasNext: true, next: 'o5' })
+				.mockResolvedValueOnce({ data: [{ id: 'u5' }], hasNext: true, next: 'o6' })
+				.mockResolvedValueOnce({ data: [{ id: 'u6' }], hasNext: false }),
+		};
+		const fake = makeArityFakeServer();
+		registerUserTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_get_users')!;
+		const res = await handler({ limit: 100, include_deactivated: false });
+
+		expect(client.getUsers).toHaveBeenCalledTimes(6);
+		const payload = parsePayload(res);
+		expect(payload.count).toBe(6);
+	});
+
+	it('lever_list_emails paginates to hasNext:false (cap removed)', async () => {
+		const client: any = {
+			getEmails: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'e1' }], hasNext: true, next: 'o2' })
+				.mockResolvedValueOnce({ data: [{ id: 'e2' }], hasNext: true, next: 'o3' })
+				.mockResolvedValueOnce({ data: [{ id: 'e3' }], hasNext: true, next: 'o4' })
+				.mockResolvedValueOnce({ data: [{ id: 'e4' }], hasNext: true, next: 'o5' })
+				.mockResolvedValueOnce({ data: [{ id: 'e5' }], hasNext: true, next: 'o6' })
+				.mockResolvedValueOnce({ data: [{ id: 'e6' }], hasNext: false }),
+		};
+		const fake = makeArityFakeServer();
+		registerCandidateTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_list_emails')!;
+		const res = await handler({ opportunity_id: 'opp-1', limit: 100 });
+
+		expect(client.getEmails).toHaveBeenCalledTimes(6);
+		const payload = parsePayload(res);
+		expect(payload.count).toBe(6);
 	});
 });

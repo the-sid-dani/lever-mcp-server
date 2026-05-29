@@ -30,9 +30,7 @@ export function registerFeedbackTools(server: McpServer, client: LeverClient) {
 					case "list_templates": {
 						const allTemplates: any[] = [];
 						let offset: string | undefined;
-						let batchesFetched = 0;
-						const maxBatches = 5;
-						while (batchesFetched < maxBatches) {
+						while (true) {
 							const response = await client.getFeedbackTemplates({
 								limit: args.limit ?? 100,
 								offset,
@@ -40,7 +38,6 @@ export function registerFeedbackTools(server: McpServer, client: LeverClient) {
 							if (response.data && response.data.length > 0) {
 								allTemplates.push(...response.data);
 							}
-							batchesFetched++;
 							if (!response.hasNext || !response.next) break;
 							offset = response.next;
 						}
@@ -70,9 +67,7 @@ export function registerFeedbackTools(server: McpServer, client: LeverClient) {
 						if (!args.opportunity_id) throw new Error("opportunity_id is required for action='list'");
 						const allFeedback: any[] = [];
 						let offset: string | undefined;
-						let batchesFetched = 0;
-						const maxBatches = 5;
-						while (batchesFetched < maxBatches) {
+						while (true) {
 							const response = await client.getOpportunityFeedback(args.opportunity_id, {
 								limit: args.limit ?? 100,
 								offset,
@@ -80,7 +75,6 @@ export function registerFeedbackTools(server: McpServer, client: LeverClient) {
 							if (response.data && response.data.length > 0) {
 								allFeedback.push(...response.data);
 							}
-							batchesFetched++;
 							if (!response.hasNext || !response.next) break;
 							offset = response.next;
 						}

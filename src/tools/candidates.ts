@@ -247,10 +247,8 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 			try {
 				const allEmails: any[] = [];
 				let offset: string | undefined;
-				let batchesFetched = 0;
-				const maxBatches = 5;
 
-				while (batchesFetched < maxBatches) {
+				while (true) {
 					const response = await client.getEmails(args.opportunity_id, {
 						limit: args.limit,
 						offset,
@@ -259,8 +257,6 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 					if (response.data && response.data.length > 0) {
 						allEmails.push(...response.data);
 					}
-
-					batchesFetched++;
 
 					if (!response.hasNext || !response.next) break;
 					offset = response.next;

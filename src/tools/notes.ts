@@ -23,9 +23,7 @@ export function registerNoteTools(server: McpServer, client: LeverClient) {
 					case "list": {
 						const allNotes: any[] = [];
 						let offset: string | undefined;
-						let batchesFetched = 0;
-						const maxBatches = 5;
-						while (batchesFetched < maxBatches) {
+						while (true) {
 							const response = await client.getNotes(args.opportunity_id, {
 								limit: args.limit ?? 100,
 								offset,
@@ -33,7 +31,6 @@ export function registerNoteTools(server: McpServer, client: LeverClient) {
 							if (response.data && response.data.length > 0) {
 								allNotes.push(...response.data);
 							}
-							batchesFetched++;
 							if (!response.hasNext || !response.next) break;
 							offset = response.next;
 						}

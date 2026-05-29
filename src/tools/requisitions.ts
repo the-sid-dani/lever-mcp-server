@@ -39,9 +39,19 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 						if (args.created_at_end) params.created_at_end = args.created_at_end;
 						if (args.offset) params.offset = args.offset;
 
-						// Get requisitions from API
-						const response = await client.getRequisitions(params);
-						const requisitions = response.data || [];
+						// Get requisitions from API -- full pagination loop (VAL-105)
+						const allReqs: any[] = [];
+						let pageOffset = args.offset;
+						while (true) {
+							const pageParams = { ...params, offset: pageOffset };
+							const response = await client.getRequisitions(pageParams);
+							if (response.data && response.data.length > 0) {
+								allReqs.push(...response.data);
+							}
+							if (!response.hasNext || !response.next) break;
+							pageOffset = response.next;
+						}
+						const requisitions = allReqs;
 
 						// Format the results to clearly show ID vs Code distinction
 						const formattedResults = requisitions.map((req: any) => ({

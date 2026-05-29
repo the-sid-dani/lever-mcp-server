@@ -14,10 +14,8 @@ export function registerUserTools(server: McpServer, client: LeverClient) {
 			try {
 				const allUsers: any[] = [];
 				let offset: string | undefined;
-				let batchesFetched = 0;
-				const maxBatches = 5;
 
-				while (batchesFetched < maxBatches) {
+				while (true) {
 					const response = await client.getUsers({
 						limit: 100,
 						offset,
@@ -27,8 +25,6 @@ export function registerUserTools(server: McpServer, client: LeverClient) {
 					if (response.data && response.data.length > 0) {
 						allUsers.push(...response.data);
 					}
-
-					batchesFetched++;
 
 					if (!response.hasNext || !response.next) break;
 					offset = response.next;
