@@ -46,6 +46,13 @@ describe('lever_notes action dispatch', () => {
 		const fake = makeFakeServer();
 		registry = fake.registry;
 		registerNoteTools(fake.server, client as LeverClient);
+		// resolvePerformAs (OAUTH disabled in test env) needs a default user.
+		process.env.LEVER_DEFAULT_USER_ID = "test-default-user";
+		__resetSharedResolver();
+	});
+
+	afterEach(() => {
+		delete process.env.LEVER_DEFAULT_USER_ID;
 	});
 
 	it("action='list' routes to client.getNotes", async () => {
@@ -65,12 +72,23 @@ describe('lever_notes action dispatch', () => {
 		expect(payload.id).toBe('n1');
 	});
 
-	it("action='add' routes to client.addNote", async () => {
+	it("action='add' routes to client.addNote with the resolved perform_as", async () => {
 		const { handler } = registry.get('lever_notes')!;
 		const res = await handler({ action: 'add', opportunity_id: 'opp-1', note: 'a note' });
-		expect(client.addNote).toHaveBeenCalledWith('opp-1', 'a note', undefined);
+		expect(client.addNote).toHaveBeenCalledWith('opp-1', 'a note', 'test-default-user');
 		const payload = parsePayload(res);
 		expect(payload.success).toBe(true);
+	});
+
+	it("action='add' fails loud and does NOT write when perform_as cannot be resolved", async () => {
+		// OAuth off + no LEVER_DEFAULT_USER_ID -> resolvePerformAs throws -> caught by handler.
+		delete process.env.LEVER_DEFAULT_USER_ID;
+		__resetSharedResolver();
+		const { handler } = registry.get('lever_notes')!;
+		const res = await handler({ action: 'add', opportunity_id: 'opp-1', note: 'a note' });
+		expect(client.addNote).not.toHaveBeenCalled();
+		const payload = parsePayload(res);
+		expect(payload.error).toMatch(/perform_as cannot be resolved/i);
 	});
 
 	it("action='add' with no note returns an error response (handler catches the throw)", async () => {

@@ -260,17 +260,14 @@ export class LeverClient {
 	async addNote(
 		opportunityId: string,
 		note: string,
-		authorEmail?: string,
+		performAs?: string,
 	): Promise<{ data: LeverNote }> {
-		const data: { value: string; author?: string } = { value: note };
-		if (authorEmail) {
-			data.author = authorEmail;
-		}
+		const params = performAs ? { perform_as: performAs } : undefined;
 		return this.makeRequest<{ data: LeverNote }>(
 			"POST",
 			`/opportunities/${opportunityId}/notes`,
-			undefined,
-			data,
+			params,
+			{ value: note },
 		);
 	}
 
