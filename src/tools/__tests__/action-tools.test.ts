@@ -523,3 +523,44 @@ describe('lever_get_users + lever_list_emails full pagination (VAL-105)', () => 
 		expect(payload.count).toBe(6);
 	});
 });
+
+describe('lever_archive action=search recall + coverage (VAL-104)', () => {
+	it('Test A: fetch_all_pages=true paginates to hasNext:false (50-page cap gone) and reports complete coverage', async () => {
+		const client: any = {
+			getArchivedCandidates: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'c1' }], hasNext: true, next: 'o2' })
+				.mockResolvedValueOnce({ data: [{ id: 'c2' }], hasNext: false }),
+			getOpportunityInterviews: vi.fn(async () => ({ data: [] })),
+		};
+		const fake = makeFakeServer();
+		registerArchiveTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_archive')!;
+		const res = await handler({ action: 'search', fetch_all_pages: true, include_interviews: false });
+
+		expect(client.getArchivedCandidates).toHaveBeenCalledTimes(2);
+		const payload = parsePayload(res);
+		expect(payload.coverage.complete).toBe(true);
+		expect(payload.summary.total_archived_candidates).toBe(2);
+	});
+
+	it('Test B: fetch_all_pages=false with a next page surfaces complete:false coverage + warning', async () => {
+		const client: any = {
+			getArchivedCandidates: vi
+				.fn()
+				.mockResolvedValueOnce({ data: [{ id: 'c1' }], hasNext: true, next: 'o2' }),
+			getOpportunityInterviews: vi.fn(async () => ({ data: [] })),
+		};
+		const fake = makeFakeServer();
+		registerArchiveTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_archive')!;
+		const res = await handler({ action: 'search', fetch_all_pages: false, include_interviews: false });
+
+		const payload = parsePayload(res);
+		expect(payload.coverage.complete).toBe(false);
+		expect(typeof payload.coverage.warning).toBe('string');
+		expect(payload.coverage.warning.length).toBeGreaterThan(0);
+	});
+});

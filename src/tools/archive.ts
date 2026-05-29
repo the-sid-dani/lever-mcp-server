@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { LeverClient } from "../lever/client.js";
 import { formatOpportunity } from "./formatters.js";
+import { mapLimit } from "../utils/concurrency.js";
 
 export function registerArchiveTools(server: McpServer, client: LeverClient) {
 	// lever_archive — consolidated (replaces lever_get_archive_reasons + lever_archive_candidate + lever_search_archived_candidates)
@@ -26,7 +27,7 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 			recruiter_name: z.string().optional().describe("For action='search' only — filter by recruiter/owner name."),
 			limit: z.number().default(100).optional().describe("For action='search' only — max archived candidates per page."),
 			offset: z.string().optional().describe("For action='search' only — pagination offset token."),
-			fetch_all_pages: z.boolean().default(false).optional().describe("For action='search' only — fetch all pages of results (up to 50 page safety limit)."),
+			fetch_all_pages: z.boolean().default(false).optional().describe("For action='search' only — when true, paginate exhaustively to hasNext:false (no page cap). Default false returns a single page; check the coverage object before concluding a candidate was never archived."),
 		},
 		async (args) => {
 			try {
@@ -111,12 +112,14 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 						let hasNext = true;
 						let totalFetched = 0;
 						let pageCount = 0;
-						const maxPages = args.fetch_all_pages ? 50 : 1; // Safety limit
 						const includeInterviews = args.include_interviews ?? true;
 						const limit = args.limit ?? 100;
 
-						// Fetch candidates with pagination
-						while (hasNext && pageCount < maxPages) {
+						// Fetch candidates with pagination. fetch_all_pages=true loops to
+						// exhaustion (no page cap); the client token bucket serializes the page
+						// fetches and handles 429s. fetch_all_pages=false (default) fetches
+						// exactly one page and preserves hasNext for the caller.
+						while (hasNext) {
 							const response = await client.getArchivedCandidates({
 								posting_id: args.posting_id,
 								archived_at_start: args.archived_at_start,
@@ -130,21 +133,16 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 							totalFetched += response.data.length;
 							pageCount++;
 
-							// Check if we should continue fetching
 							if (!args.fetch_all_pages) {
-								// Single page mode - include pagination info in response
-								hasNext = false;
-							} else {
-								// Multi-page mode - continue if there are more results
-								if (!response.hasNext || !response.next) break;
-								offset = response.next;
-							}
-
-							// For single page, preserve pagination info for next call
-							if (!args.fetch_all_pages) {
+								// Single-page mode: preserve pagination info for next call and stop.
 								hasNext = response.hasNext || false;
+								offset = response.next;
 								break;
 							}
+
+							// Multi-page mode: continue until there are no more results.
+							if (!response.hasNext || !response.next) break;
+							offset = response.next;
 						}
 
 						// Filter by recruiter name if provided
@@ -170,8 +168,10 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 						}
 
 						// Process candidates with interview data if requested
-						const processedCandidates = await Promise.all(
-							filteredCandidates.map(async (candidate: any) => {
+						const processedCandidates = await mapLimit(
+							filteredCandidates,
+							8,
+							async (candidate: any) => {
 								const candidateData = formatOpportunity(candidate);
 
 								if (includeInterviews) {
@@ -195,7 +195,7 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 								}
 
 								return candidateData;
-							})
+							},
 						);
 
 						// Generate summary statistics
@@ -218,9 +218,23 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 							},
 						};
 
+						// Always surface coverage so a partial single-page result can never be
+						// mistaken for the full set. complete is true only when exhaustive:
+						// all_pages ran to hasNext:false, or everything fit on one page.
+						const partialSinglePage = !args.fetch_all_pages && hasNext;
+						const coverage = {
+							fetched: allCandidates.length,
+							complete: !partialSinglePage,
+							mode: args.fetch_all_pages ? "all_pages" : "single_page",
+							warning: partialSinglePage
+								? "Single-page archive search returned only the first page. Set fetch_all_pages=true for an exhaustive search; do not conclude a candidate was never archived from this partial result."
+								: null,
+						};
+
 						// Include pagination info for single page mode
 						const result: any = {
 							summary,
+							coverage,
 							candidates: processedCandidates,
 						};
 
