@@ -69,18 +69,18 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 						],
 					};
 				} else if (args.query) {
-					// For name searches, fetch and filter locally
+					// For name searches, fetch and filter locally.
+					// VAL-102: sweep the FULL base to hasNext:false (no maxPages /
+					// maxFetch caps) so no candidate is silently dropped. The client
+					// token bucket serializes requests + handles 429 backoff, so
+					// sequential awaits here are correct (no added delay/concurrency).
 					const allOpportunities: LeverOpportunity[] = [];
 					let offset: string | undefined;
-					let pagesChecked = 0;
-					const maxPages = 5; // Increased to check more candidates
+					let pagesScanned = 0;
+					let recordsScanned = 0;
 					const queryLower = args.query.toLowerCase();
-					const maxFetch = args.limit * 5; // Fetch more to ensure we have enough for pagination
 
-					while (
-						pagesChecked < maxPages &&
-						allOpportunities.length < maxFetch
-					) {
+					while (true) {
 						const response = await client.getOpportunities({
 							stage_id: stageId,
 							posting_id: args.posting_id,
@@ -92,13 +92,14 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 
 						// Filter candidates by name
 						for (const c of response.data) {
+							recordsScanned++;
 							const name = (c.name || "").toLowerCase();
 							if (queryLower && name.includes(queryLower)) {
 								allOpportunities.push(c);
 							}
 						}
 
-						pagesChecked++;
+						pagesScanned++;
 						if (!response.hasNext || !response.next) break;
 
 						// Use the next token from the API response
@@ -125,13 +126,14 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 						next_page: hasMore ? page + 1 : null,
 						query: args.query,
 						candidates: paginatedCandidates.map(formatOpportunity),
+						// VAL-102: coverage proves the result is the full set. The loop
+						// always runs to hasNext:false, so complete is always true.
+						coverage: {
+							records_scanned: recordsScanned,
+							pages_scanned: pagesScanned,
+							complete: true,
+						},
 					};
-
-					// Add warning if we hit the limit
-					if (pagesChecked >= maxPages && hasMore) {
-						result.warning = `Search limited to first ${pagesChecked * 100} candidates. More results may exist.`;
-						result.total_scanned = pagesChecked * 100;
-					}
 
 					return {
 						content: [

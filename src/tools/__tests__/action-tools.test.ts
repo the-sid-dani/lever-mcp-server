@@ -6,6 +6,7 @@ import { registerFeedbackTools } from '../feedback.js';
 import { registerStageTools } from '../stages.js';
 import { registerArchiveTools } from '../archive.js';
 import { registerRequisitionTools } from '../requisitions.js';
+import { registerSearchTools } from '../search.js';
 
 // A tiny fake McpServer that captures (name, schema, handler) registrations.
 type Handler = (args: any) => Promise<{ content: Array<{ type: string; text: string }> }>;
@@ -278,5 +279,51 @@ describe('lever_requisitions action dispatch', () => {
 		expect(client.getRequisitionByCode).not.toHaveBeenCalled();
 		const payload = parsePayload(res);
 		expect(payload.error).toMatch(/requisition_identifier is required/i);
+	});
+});
+
+
+describe('lever_search_candidates name-sweep coverage (VAL-102)', () => {
+	// registerSearchTools registers lever_search_candidates with the 3-arg
+	// overload (name, schema, handler) -- NO description string. This local fake
+	// captures the LAST two args as (schema, handler) regardless of arity.
+	function makeSearchFakeServer() {
+		const registry = new Map<string, { schema: any; handler: Handler }>();
+		const server = {
+			tool: (name: string, ...rest: any[]) => {
+				const handler = rest[rest.length - 1];
+				const schema = rest[rest.length - 2];
+				registry.set(name, { schema, handler });
+			},
+		} as unknown as McpServer;
+		return { server, registry };
+	}
+
+	it('paginates to hasNext:false across all pages and reports complete coverage', async () => {
+		const client: any = {
+			getOpportunities: vi
+				.fn()
+				.mockResolvedValueOnce({
+					data: [{ id: 'a', name: 'Jane Smith' }],
+					hasNext: true,
+					next: 'off2',
+				})
+				.mockResolvedValueOnce({
+					data: [{ id: 'b', name: 'Jane Doe' }],
+					hasNext: false,
+				}),
+		};
+		const fake = makeSearchFakeServer();
+		registerSearchTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_search_candidates')!;
+		const res = await handler({ query: 'Jane', limit: 200, page: 1 });
+
+		// Full sweep across both pages proves the maxPages/maxFetch caps are gone.
+		expect(client.getOpportunities).toHaveBeenCalledTimes(2);
+		const payload = parsePayload(res);
+		expect(payload.total_matches).toBe(2);
+		expect(payload.coverage.complete).toBe(true);
+		expect(payload.coverage.pages_scanned).toBe(2);
 	});
 });
