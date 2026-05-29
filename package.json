@@ -18,6 +18,7 @@
 		"proxy": "gcloud run services proxy lever-mcp --region=us-central1"
 	},
 	"dependencies": {
+		"@google-cloud/firestore": "^8.6.0",
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"express": "^4.21.0",
 		"jose": "^6.1.3",

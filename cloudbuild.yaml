@@ -71,7 +71,7 @@ steps:
       - '--set-secrets'
       - 'LEVER_API_KEY=lever-api-key:latest,GOOGLE_OAUTH_CLIENT_ID=google-oauth-client-id:latest,GOOGLE_OAUTH_CLIENT_SECRET=google-oauth-client-secret:latest,LEVER_DEFAULT_USER_ID=lever-default-user-id:latest'
       - '--set-env-vars'
-      - 'NODE_ENV=production,MCP_PUBLIC_URL=https://lever-mcp-201626763325.us-central1.run.app,ALLOWED_HOSTED_DOMAIN=samba.tv'
+      - 'NODE_ENV=production,MCP_PUBLIC_URL=https://lever-mcp-201626763325.us-central1.run.app,ALLOWED_HOSTED_DOMAIN=samba.tv,TOKEN_STORE=firestore'
 
 images:
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPO}/${_SERVICE_NAME}:${_TAG}'

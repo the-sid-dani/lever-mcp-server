@@ -18,6 +18,7 @@ import {
 	validateOAuthConfig,
 	isOAuthEnabled,
 	GoogleOAuthBroker,
+	createTokenStore,
 } from "./auth/index.js";
 import { logger } from "./utils/logger.js";
 
@@ -86,6 +87,7 @@ if (isOAuthEnabled()) {
 		googleRedirectUri,
 		hostedDomain: OAUTH_CONFIG.hostedDomain,
 		mcpPublicUrl,
+		store: createTokenStore(),
 	});
 
 	// Serve standard MCP AS endpoints at the application root:

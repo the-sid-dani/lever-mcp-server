@@ -5,3 +5,9 @@ export { GoogleOAuthBroker } from './google-oauth-broker.js';
 export type { GoogleOAuthBrokerOptions } from './google-oauth-broker.js';
 export { GoogleWorkspaceVerifier } from './google-verifier.js';
 export type { GoogleClaims, GoogleWorkspaceVerifierOptions } from './google-verifier.js';
+export {
+	createTokenStore,
+	InMemoryTokenStore,
+	FirestoreTokenStore,
+} from './token-store.js';
+export type { TokenStore, StoredToken, StoredClient } from './token-store.js';
