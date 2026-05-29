@@ -403,6 +403,52 @@ describe('lever_advanced_search full pagination (VAL-103)', () => {
 		expect(payload.coverage.pages_scanned).toBe(2);
 		expect(payload.coverage.records_scanned).toBe(2);
 	});
+
+	it('multi-tag: keeps candidates matching a LATER tag and does NOT narrow server-side by tag (B2)', async () => {
+		// Two candidates: 'a' matches only tag "a", 'b' matches only tag "b".
+		// The old code sent tag="a" server-side (first tag) which would drop 'b'.
+		// With the fix the sweep is full + tags are filtered client-side, so BOTH match.
+		const getOpportunities = vi.fn().mockResolvedValueOnce({
+			data: [
+				{ id: 'a', name: 'Cand A', emails: [], tags: ['a'], location: '', headline: '' },
+				{ id: 'b', name: 'Cand B', emails: [], tags: ['b'], location: '', headline: '' },
+			],
+			hasNext: false,
+		});
+		const client: any = { getOpportunities };
+		const fake = makeFakeServer();
+		registerAdvancedSearchTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_advanced_search')!;
+		const res = await handler({ tags: 'a,b', limit: 50, page: 1, archived: false });
+
+		const payload = parsePayload(res);
+		const ids = payload.results.map((r: any) => r.id);
+		expect(ids).toContain('a');
+		expect(ids).toContain('b');
+		expect(payload.total_matches).toBe(2);
+
+		// No server-side `tag` narrowing on any getOpportunities call.
+		for (const call of getOpportunities.mock.calls) {
+			expect(call[0]).not.toHaveProperty('tag');
+		}
+	});
+
+	it('archived:true is passed through to getOpportunities (B2)', async () => {
+		const getOpportunities = vi.fn().mockResolvedValueOnce({
+			data: [{ id: 'a', name: 'Cand A', emails: [], tags: [], location: '', headline: '' }],
+			hasNext: false,
+		});
+		const client: any = { getOpportunities };
+		const fake = makeFakeServer();
+		registerAdvancedSearchTools(fake.server, client as LeverClient);
+
+		const { handler } = fake.registry.get('lever_advanced_search')!;
+		await handler({ archived: true, limit: 50, page: 1 });
+
+		expect(getOpportunities).toHaveBeenCalledTimes(1);
+		expect(getOpportunities.mock.calls[0]![0]).toMatchObject({ archived: true });
+	});
 });
 
 describe('lever_notes action=list full pagination (VAL-105)', () => {

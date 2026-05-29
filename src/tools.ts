@@ -91,7 +91,6 @@ export function registerSearchTools(server: McpServer, client: LeverClient): voi
 			name: z.string().optional().describe("Candidate name search"),
 			email: z.string().optional().describe("Exact email match"),
 			archived: z.boolean().default(false).describe("Include archived candidates"),
-			mode: z.enum(["comprehensive", "quick"]).default("comprehensive").describe("Search mode"),
 		},
 		async (params): Promise<McpToolResponse> => {
 			trace("lever_advanced_search", "START", params);
@@ -144,10 +143,8 @@ export function registerSearchTools(server: McpServer, client: LeverClient): voi
 					};
 
 					if (emailSearch) searchParams.email = params.email;
-					if (stageIds.length > 0) searchParams.stage_id = stageIds[0]!;
-					else if (params.stage) searchParams.stage_id = params.stage;
 					if (params.posting_id) searchParams.posting_id = params.posting_id;
-					if (params.tags) searchParams.tag = params.tags.split(",")[0];
+					if (params.archived) searchParams.archived = true;
 
 					const response = await client.getOpportunities(searchParams as Parameters<typeof client.getOpportunities>[0]);
 
@@ -155,6 +152,17 @@ export function registerSearchTools(server: McpServer, client: LeverClient): voi
 
 					pagesScanned++;
 					recordsScanned += response.data.length;
+
+					// Build the requested-stage set client-side: resolved stage ids
+					// (from the `stages` array) plus a raw `stage` param. Matched
+					// against each opp's stage id OR lowercased stage text so no
+					// later-stage candidate is dropped by server-side narrowing.
+					const stageIdSet = new Set<string>(stageIds);
+					if (params.stage) stageIdSet.add(params.stage);
+					const stageTextSet = new Set<string>(
+						[...stageIdSet].map((s: string) => s.toLowerCase()),
+					);
+					const stageFilterActive = stageIdSet.size > 0;
 
 					// Filter candidates
 					const filtered = response.data.filter((c: LeverOpportunity) => {
@@ -172,6 +180,24 @@ export function registerSearchTools(server: McpServer, client: LeverClient): voi
 						if (skillList.length && !skillList.some((skill: string) => `${cName} ${cTags.join(" ")} ${cHeadline}`.includes(skill))) return false;
 						if (locationList.length && !locationList.some((loc: string) => cLocation.includes(loc))) return false;
 						if (tagList.length && !tagList.some((tag: string) => cTags.some((ct: string) => ct.includes(tag)))) return false;
+
+						// Client-side stage filter across ALL requested stages.
+						// c.stage may be a string id, an object {id, text}, or undefined.
+						if (stageFilterActive) {
+							const stage = c.stage;
+							let stageId: string | undefined;
+							let stageText: string | undefined;
+							if (typeof stage === "string") {
+								stageId = stage;
+							} else if (stage && typeof stage === "object") {
+								stageId = stage.id;
+								stageText = stage.text;
+							}
+							const idMatch = stageId !== undefined && stageIdSet.has(stageId);
+							const textMatch =
+								stageText !== undefined && stageTextSet.has(stageText.toLowerCase());
+							if (!idMatch && !textMatch) return false;
+						}
 
 						return true;
 					});

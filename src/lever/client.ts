@@ -209,6 +209,7 @@ export class LeverClient {
 		email?: string;
 		tag?: string;
 		origin?: string;
+		archived?: boolean;
 		limit?: number;
 		offset?: string;
 		expand?: string[];
