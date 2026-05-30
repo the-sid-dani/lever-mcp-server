@@ -1,4 +1,4 @@
-import { Firestore } from '@google-cloud/firestore';
+import { Firestore } from "@google-cloud/firestore";
 
 /**
  * Durable token-store abstraction for the Google OAuth broker.
@@ -85,8 +85,8 @@ export class InMemoryTokenStore implements TokenStore {
 	}
 }
 
-const TOKENS_COLLECTION = 'lever_mcp_oauth_tokens';
-const CLIENTS_COLLECTION = 'lever_mcp_oauth_clients';
+const TOKENS_COLLECTION = "lever_mcp_oauth_tokens";
+const CLIENTS_COLLECTION = "lever_mcp_oauth_clients";
 
 /**
  * Firestore backend (prod). Tokens persist across Cloud Run revisions. Uses
@@ -109,15 +109,12 @@ export class FirestoreTokenStore implements TokenStore {
 	}
 
 	async getToken(token: string): Promise<StoredToken | null> {
-		const snap = await this.firestore()
-			.collection(TOKENS_COLLECTION)
-			.doc(token)
-			.get();
+		const snap = await this.firestore().collection(TOKENS_COLLECTION).doc(token).get();
 		if (!snap.exists) {
 			return null;
 		}
 		const data = snap.data() as Partial<StoredToken> | undefined;
-		if (!data || typeof data.expiresAt !== 'number') {
+		if (!data || typeof data.expiresAt !== "number") {
 			return null;
 		}
 		if (data.expiresAt < nowSeconds()) {
@@ -126,24 +123,21 @@ export class FirestoreTokenStore implements TokenStore {
 		}
 		return {
 			token,
-			clientId: String(data.clientId ?? ''),
+			clientId: String(data.clientId ?? ""),
 			scopes: Array.isArray(data.scopes) ? data.scopes.map(String) : [],
 			expiresAt: data.expiresAt,
-			email: String(data.email ?? ''),
+			email: String(data.email ?? ""),
 		};
 	}
 
 	async putToken(t: StoredToken): Promise<void> {
-		await this.firestore()
-			.collection(TOKENS_COLLECTION)
-			.doc(t.token)
-			.set({
-				token: t.token,
-				clientId: t.clientId,
-				scopes: t.scopes,
-				expiresAt: t.expiresAt,
-				email: t.email,
-			});
+		await this.firestore().collection(TOKENS_COLLECTION).doc(t.token).set({
+			token: t.token,
+			clientId: t.clientId,
+			scopes: t.scopes,
+			expiresAt: t.expiresAt,
+			email: t.email,
+		});
 	}
 
 	async deleteToken(token: string): Promise<void> {
@@ -151,10 +145,7 @@ export class FirestoreTokenStore implements TokenStore {
 	}
 
 	async getClient(clientId: string): Promise<StoredClient | null> {
-		const snap = await this.firestore()
-			.collection(CLIENTS_COLLECTION)
-			.doc(clientId)
-			.get();
+		const snap = await this.firestore().collection(CLIENTS_COLLECTION).doc(clientId).get();
 		if (!snap.exists) {
 			return null;
 		}
@@ -166,10 +157,7 @@ export class FirestoreTokenStore implements TokenStore {
 	}
 
 	async putClient(c: StoredClient): Promise<void> {
-		await this.firestore()
-			.collection(CLIENTS_COLLECTION)
-			.doc(c.client_id)
-			.set(c);
+		await this.firestore().collection(CLIENTS_COLLECTION).doc(c.client_id).set(c);
 	}
 }
 
@@ -178,7 +166,7 @@ export class FirestoreTokenStore implements TokenStore {
  * In-memory is the default so tests + local dev need no Firestore.
  */
 export function createTokenStore(): TokenStore {
-	if (process.env.TOKEN_STORE === 'firestore') {
+	if (process.env.TOKEN_STORE === "firestore") {
 		return new FirestoreTokenStore();
 	}
 	return new InMemoryTokenStore();

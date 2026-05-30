@@ -6,15 +6,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 export interface RequestContext {
-  email?: string;
+	email?: string;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();
 
 export function runWithRequestContext<T>(ctx: RequestContext, fn: () => T): T {
-  return storage.run(ctx, fn);
+	return storage.run(ctx, fn);
 }
 
 export function getRequestEmail(): string | undefined {
-  return storage.getStore()?.email;
+	return storage.getStore()?.email;
 }

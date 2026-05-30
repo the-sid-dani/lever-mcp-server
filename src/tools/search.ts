@@ -40,7 +40,7 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 
 				// Check if query looks like an email
 				let emailFilter: string | undefined;
-				if (args.query && args.query.includes("@")) {
+				if (args.query?.includes("@")) {
 					emailFilter = args.query;
 				}
 
@@ -69,7 +69,8 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 							},
 						],
 					};
-				} else if (args.query) {
+				}
+				if (args.query) {
 					// For name searches, fetch and filter locally.
 					// VAL-102: sweep the FULL base to hasNext:false (no maxPages /
 					// maxFetch caps) so no candidate is silently dropped. The client
@@ -121,10 +122,7 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 					const page = Math.max(1, args.page);
 					const startIndex = (page - 1) * args.limit;
 					const endIndex = startIndex + args.limit;
-					const paginatedCandidates = allOpportunities.slice(
-						startIndex,
-						endIndex,
-					);
+					const paginatedCandidates = allOpportunities.slice(startIndex, endIndex);
 					const totalPages = Math.ceil(allOpportunities.length / args.limit);
 					const hasMore = page < totalPages;
 
@@ -155,31 +153,30 @@ export function registerSearchTools(server: McpServer, client: LeverClient) {
 							},
 						],
 					};
-				} else {
-					// No search criteria, just get candidates
-					const response = await client.getOpportunities({
-						stage_id: stageId,
-						posting_id: args.posting_id,
-						limit: args.limit,
-					});
-
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(
-									{
-										count: response.data.length,
-										query: args.query,
-										candidates: response.data.map(formatOpportunity),
-									},
-									null,
-									2,
-								),
-							},
-						],
-					};
 				}
+				// No search criteria, just get candidates
+				const response = await client.getOpportunities({
+					stage_id: stageId,
+					posting_id: args.posting_id,
+					limit: args.limit,
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									count: response.data.length,
+									query: args.query,
+									candidates: response.data.map(formatOpportunity),
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
 			} catch (error) {
 				return {
 					content: [

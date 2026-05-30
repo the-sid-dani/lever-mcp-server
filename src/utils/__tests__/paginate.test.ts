@@ -73,9 +73,7 @@ describe("collectAllPages", () => {
 			} as Page<number>;
 		});
 
-		await expect(collectAllPages(fetchPage, { maxPages: 3 })).rejects.toThrow(
-			/maxPages=3/,
-		);
+		await expect(collectAllPages(fetchPage, { maxPages: 3 })).rejects.toThrow(/maxPages=3/);
 	});
 
 	it("does not throw when a dataset ends exactly at maxPages", async () => {

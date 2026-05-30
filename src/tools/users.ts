@@ -26,16 +26,20 @@ export function registerUserTools(server: McpServer, client: LeverClient) {
 					content: [
 						{
 							type: "text",
-							text: JSON.stringify({
-								count: allUsers.length,
-								users: allUsers.map((user: any) => ({
-									id: user.id,
-									name: user.name || "Unknown",
-									email: user.email || "N/A",
-									username: user.username || "",
-									deactivated: !!user.deactivatedAt,
-								})),
-							}, null, 2),
+							text: JSON.stringify(
+								{
+									count: allUsers.length,
+									users: allUsers.map((user: any) => ({
+										id: user.id,
+										name: user.name || "Unknown",
+										email: user.email || "N/A",
+										username: user.username || "",
+										deactivated: !!user.deactivatedAt,
+									})),
+								},
+								null,
+								2,
+							),
 						},
 					],
 				};

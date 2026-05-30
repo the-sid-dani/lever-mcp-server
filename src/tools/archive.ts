@@ -11,24 +11,79 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 		"lever_archive",
 		"Manage archived candidates. Use action='list_reasons' to discover valid archive reason IDs, action='archive' to archive a candidate (single-tenant — perform_as defaults to LEVER_DEFAULT_USER_ID via the client), or action='search' to query archived candidates by posting, date range, recruiter, or reason.",
 		{
-			action: z.enum(["list_reasons", "archive", "search"]).describe(
-				"Operation to perform. list_reasons=fetch all archive reason IDs; archive=archive opportunity_id with archive_reason_id; search=query archived candidates with optional filters."
-			),
+			action: z
+				.enum(["list_reasons", "archive", "search"])
+				.describe(
+					"Operation to perform. list_reasons=fetch all archive reason IDs; archive=archive opportunity_id with archive_reason_id; search=query archived candidates with optional filters.",
+				),
 			// archive action params
-			opportunity_id: z.string().optional().describe("For action='archive' only — the candidate's opportunity ID."),
-			archive_reason_id: z.string().optional().describe("For action='archive' or 'search' — archive reason ID. Use action='list_reasons' to discover valid IDs. For 'search' it filters; for 'archive' it is required."),
-			perform_as: z.string().optional().describe("For action='archive' only — optional user ID to perform on behalf of (overrides default)."),
-			clean_interviews: z.boolean().default(false).optional().describe("For action='archive' only — whether to remove pending interviews when archiving."),
-			requisition_id: z.string().optional().describe("For action='archive' only — optional requisition ID if hiring against a specific requisition."),
+			opportunity_id: z
+				.string()
+				.optional()
+				.describe("For action='archive' only — the candidate's opportunity ID."),
+			archive_reason_id: z
+				.string()
+				.optional()
+				.describe(
+					"For action='archive' or 'search' — archive reason ID. Use action='list_reasons' to discover valid IDs. For 'search' it filters; for 'archive' it is required.",
+				),
+			perform_as: z
+				.string()
+				.optional()
+				.describe(
+					"For action='archive' only — optional user ID to perform on behalf of (overrides default).",
+				),
+			clean_interviews: z
+				.boolean()
+				.default(false)
+				.optional()
+				.describe(
+					"For action='archive' only — whether to remove pending interviews when archiving.",
+				),
+			requisition_id: z
+				.string()
+				.optional()
+				.describe(
+					"For action='archive' only — optional requisition ID if hiring against a specific requisition.",
+				),
 			// search action params
-			posting_id: z.string().optional().describe("For action='search' only — specific posting ID to search within."),
-			archived_at_start: z.string().optional().describe("For action='search' only — start date for archive filter (YYYY-MM-DD)."),
-			archived_at_end: z.string().optional().describe("For action='search' only — end date for archive filter (YYYY-MM-DD)."),
-			include_interviews: z.boolean().default(true).optional().describe("For action='search' only — include interview count and details."),
-			recruiter_name: z.string().optional().describe("For action='search' only — filter by recruiter/owner name."),
-			limit: z.number().default(100).optional().describe("For action='search' only — max archived candidates per page."),
-			offset: z.string().optional().describe("For action='search' only — pagination offset token."),
-			fetch_all_pages: z.boolean().default(false).optional().describe("For action='search' only — when true, paginate exhaustively to hasNext:false (no page cap). Default false returns a single page; check the coverage object before concluding a candidate was never archived."),
+			posting_id: z
+				.string()
+				.optional()
+				.describe("For action='search' only — specific posting ID to search within."),
+			archived_at_start: z
+				.string()
+				.optional()
+				.describe("For action='search' only — start date for archive filter (YYYY-MM-DD)."),
+			archived_at_end: z
+				.string()
+				.optional()
+				.describe("For action='search' only — end date for archive filter (YYYY-MM-DD)."),
+			include_interviews: z
+				.boolean()
+				.default(true)
+				.optional()
+				.describe("For action='search' only — include interview count and details."),
+			recruiter_name: z
+				.string()
+				.optional()
+				.describe("For action='search' only — filter by recruiter/owner name."),
+			limit: z
+				.number()
+				.default(100)
+				.optional()
+				.describe("For action='search' only — max archived candidates per page."),
+			offset: z
+				.string()
+				.optional()
+				.describe("For action='search' only — pagination offset token."),
+			fetch_all_pages: z
+				.boolean()
+				.default(false)
+				.optional()
+				.describe(
+					"For action='search' only — when true, paginate exhaustively to hasNext:false (no page cap). Default false returns a single page; check the coverage object before concluding a candidate was never archived.",
+				),
 		},
 		async (args) => {
 			try {
@@ -36,15 +91,19 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 					case "list_reasons": {
 						const reasons = await client.getArchiveReasons();
 						return {
-							content: [{
-								type: "text",
-								text: JSON.stringify(reasons, null, 2),
-							}],
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify(reasons, null, 2),
+								},
+							],
 						};
 					}
 					case "archive": {
-						if (!args.opportunity_id) throw new Error("opportunity_id is required for action='archive'");
-						if (!args.archive_reason_id) throw new Error("archive_reason_id is required for action='archive'");
+						if (!args.opportunity_id)
+							throw new Error("opportunity_id is required for action='archive'");
+						if (!args.archive_reason_id)
+							throw new Error("archive_reason_id is required for action='archive'");
 
 						// Get candidate info first for context
 						const oppResponse = await client.getOpportunity(args.opportunity_id);
@@ -55,7 +114,9 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 						const archiveReasons = archiveReasonsResponse.data || [];
 
 						// Find the reason details
-						const selectedReason = archiveReasons.find((reason: any) => reason.id === args.archive_reason_id);
+						const selectedReason = archiveReasons.find(
+							(reason: any) => reason.id === args.archive_reason_id,
+						);
 
 						if (!selectedReason) {
 							return {
@@ -64,10 +125,12 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 										type: "text",
 										text: JSON.stringify({
 											error: `Invalid archive reason ID: ${args.archive_reason_id}`,
-											available_reasons: archiveReasons.map((reason: any) => ({
-												id: reason.id,
-												text: reason.text,
-											})),
+											available_reasons: archiveReasons.map(
+												(reason: any) => ({
+													id: reason.id,
+													text: reason.text,
+												}),
+											),
 											note: "Use action='list_reasons' to see all valid archive reason IDs",
 										}),
 									},
@@ -77,7 +140,10 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 
 						// Resolve perform_as per auth policy. args.perform_as is the explicit
 						// override, honored only on the OAUTH-disabled path.
-						const performAs = await resolvePerformAs(getSharedResolver(client), args.perform_as);
+						const performAs = await resolvePerformAs(
+							getSharedResolver(client),
+							args.perform_as,
+						);
 
 						// Archive the candidate
 						await client.archiveOpportunity(
@@ -115,9 +181,10 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 						const allCandidates: any[] = [];
 						let offset = args.offset;
 						let hasNext = true;
-						let totalFetched = 0;
 						let pageCount = 0;
-						const includeInterviews = args.fetch_all_pages ? false : (args.include_interviews ?? true);
+						const includeInterviews = args.fetch_all_pages
+							? false
+							: (args.include_interviews ?? true);
 						const limit = args.limit ?? 100;
 
 						// Fetch candidates with pagination. fetch_all_pages=true loops to
@@ -135,7 +202,6 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 							});
 
 							allCandidates.push(...response.data);
-							totalFetched += response.data.length;
 							pageCount++;
 
 							if (!args.fetch_all_pages) {
@@ -158,16 +224,20 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 							const recruiterLower = args.recruiter_name.toLowerCase();
 							filteredCandidates = allCandidates.filter((candidate: any) => {
 								// Check posting owner
-								if (candidate.posting && typeof candidate.posting === 'object') {
+								if (candidate.posting && typeof candidate.posting === "object") {
 									const posting = candidate.posting;
-									if (typeof posting.owner === 'object' && posting.owner?.name) {
-										return posting.owner.name.toLowerCase().includes(recruiterLower);
+									if (typeof posting.owner === "object" && posting.owner?.name) {
+										return posting.owner.name
+											.toLowerCase()
+											.includes(recruiterLower);
 									}
 								}
 
 								// Check candidate owner
-								if (typeof candidate.owner === 'object' && candidate.owner?.name) {
-									return candidate.owner.name.toLowerCase().includes(recruiterLower);
+								if (typeof candidate.owner === "object" && candidate.owner?.name) {
+									return candidate.owner.name
+										.toLowerCase()
+										.includes(recruiterLower);
 								}
 
 								return false;
@@ -184,17 +254,25 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 								if (includeInterviews) {
 									try {
 										// Get interview data for this candidate
-										const interviewsResponse = await client.getOpportunityInterviews(candidate.id);
+										const interviewsResponse =
+											await client.getOpportunityInterviews(candidate.id);
 										const interviews = interviewsResponse.data || [];
 										candidateData.interview_count = interviews.length;
-										candidateData.interviews = interviews.map((interview: any) => ({
-											id: interview.id,
-											subject: interview.subject || "Interview",
-											date: interview.date ? new Date(interview.date).toISOString() : "Unknown",
-											interviewers: interview.interviewers?.map((i: any) => i.name || i.email || "Unknown") || [],
-											feedback_submitted: !!interview.feedbacks?.length,
-										}));
-									} catch (error) {
+										candidateData.interviews = interviews.map(
+											(interview: any) => ({
+												id: interview.id,
+												subject: interview.subject || "Interview",
+												date: interview.date
+													? new Date(interview.date).toISOString()
+													: "Unknown",
+												interviewers:
+													interview.interviewers?.map(
+														(i: any) => i.name || i.email || "Unknown",
+													) || [],
+												feedback_submitted: !!interview.feedbacks?.length,
+											}),
+										);
+									} catch {
 										// If we can't get interviews, just note it
 										candidateData.interview_count = "Unable to fetch";
 										candidateData.interviews = [];
@@ -206,19 +284,30 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 						);
 
 						// Generate summary statistics
-						const totalInterviews = processedCandidates.reduce((sum: number, candidate: any) => {
-							return sum + (typeof candidate.interview_count === 'number' ? candidate.interview_count : 0);
-						}, 0);
+						const totalInterviews = processedCandidates.reduce(
+							(sum: number, candidate: any) => {
+								return (
+									sum +
+									(typeof candidate.interview_count === "number"
+										? candidate.interview_count
+										: 0)
+								);
+							},
+							0,
+						);
 
 						const summary = {
 							total_archived_candidates: processedCandidates.length,
-							total_interviews_conducted: includeInterviews ? totalInterviews : "Not calculated",
+							total_interviews_conducted: includeInterviews
+								? totalInterviews
+								: "Not calculated",
 							pages_fetched: pageCount,
 							search_criteria: {
 								posting_id: args.posting_id || "All postings",
-								date_range: args.archived_at_start && args.archived_at_end
-									? `${args.archived_at_start} to ${args.archived_at_end}`
-									: "All time",
+								date_range:
+									args.archived_at_start && args.archived_at_end
+										? `${args.archived_at_start} to ${args.archived_at_end}`
+										: "All time",
 								recruiter: args.recruiter_name || "All recruiters",
 								archive_reason: args.archive_reason_id || "All reasons",
 								fetch_mode: args.fetch_all_pages ? "All pages" : "Single page",
@@ -229,7 +318,8 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 						// avoid a per-candidate interview fan-out over thousands of archived
 						// candidates. Surface a note so the omission is explicit.
 						if (args.fetch_all_pages) {
-							(summary as any).interviews_note = "Interview details skipped in exhaustive (fetch_all_pages) mode to avoid a per-candidate fan-out; use lever_get_interview_insights per candidate.";
+							(summary as any).interviews_note =
+								"Interview details skipped in exhaustive (fetch_all_pages) mode to avoid a per-candidate fan-out; use lever_get_interview_insights per candidate.";
 						}
 
 						// Always surface coverage so a partial single-page result can never be
@@ -277,7 +367,9 @@ export function registerArchiveTools(server: McpServer, client: LeverClient) {
 					content: [
 						{
 							type: "text",
-							text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
 						},
 					],
 				};

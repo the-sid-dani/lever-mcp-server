@@ -35,7 +35,7 @@ export async function collectAllPages<T>(
 	opts?: { maxPages?: number },
 ): Promise<CollectResult<T>> {
 	const items: T[] = [];
-	let offset: string | undefined = undefined;
+	let offset: string | undefined;
 	let pages = 0;
 	const maxPages = opts?.maxPages ?? 1000;
 

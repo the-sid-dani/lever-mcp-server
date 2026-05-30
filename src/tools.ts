@@ -32,17 +32,21 @@ function getSharedClient(apiKey: string): LeverClient {
 	}
 
 	if (sharedClientApiKey !== apiKey) {
-		console.warn("LeverClient singleton already initialized with a different API key; reusing existing client");
+		console.warn(
+			"LeverClient singleton already initialized with a different API key; reusing existing client",
+		);
 	}
 
 	return sharedClient;
 }
 
-
 // Tracing wrapper for tool execution
 function trace(toolName: string, message: string, data?: unknown) {
 	const traceId = randomUUID();
-	console.log(`[TOOL ${traceId}] ${toolName}: ${message}`, data ? JSON.stringify(data).substring(0, 200) : "");
+	console.log(
+		`[TOOL ${traceId}] ${toolName}: ${message}`,
+		data ? JSON.stringify(data).substring(0, 200) : "",
+	);
 }
 
 /**
@@ -146,7 +150,9 @@ export function registerSearchTools(server: McpServer, client: LeverClient): voi
 					if (params.posting_id) searchParams.posting_id = params.posting_id;
 					if (params.archived) searchParams.archived = true;
 
-					const response = await client.getOpportunities(searchParams as Parameters<typeof client.getOpportunities>[0]);
+					const response = await client.getOpportunities(
+						searchParams as Parameters<typeof client.getOpportunities>[0],
+					);
 
 					if (!response?.data?.length) break;
 
@@ -176,10 +182,30 @@ export function registerSearchTools(server: McpServer, client: LeverClient): voi
 
 						if (nameSearch && !cName.includes(nameSearch)) return false;
 						if (emailSearch && !cEmails.includes(emailSearch)) return false;
-						if (companyList.length && !companyList.some((comp: string) => cHeadline.includes(comp))) return false;
-						if (skillList.length && !skillList.some((skill: string) => `${cName} ${cTags.join(" ")} ${cHeadline}`.includes(skill))) return false;
-						if (locationList.length && !locationList.some((loc: string) => cLocation.includes(loc))) return false;
-						if (tagList.length && !tagList.some((tag: string) => cTags.some((ct: string) => ct.includes(tag)))) return false;
+						if (
+							companyList.length &&
+							!companyList.some((comp: string) => cHeadline.includes(comp))
+						)
+							return false;
+						if (
+							skillList.length &&
+							!skillList.some((skill: string) =>
+								`${cName} ${cTags.join(" ")} ${cHeadline}`.includes(skill),
+							)
+						)
+							return false;
+						if (
+							locationList.length &&
+							!locationList.some((loc: string) => cLocation.includes(loc))
+						)
+							return false;
+						if (
+							tagList.length &&
+							!tagList.some((tag: string) =>
+								cTags.some((ct: string) => ct.includes(tag)),
+							)
+						)
+							return false;
 
 						// Client-side stage filter across ALL requested stages.
 						// c.stage may be a string id, an object {id, text}, or undefined.
@@ -195,7 +221,8 @@ export function registerSearchTools(server: McpServer, client: LeverClient): voi
 							}
 							const idMatch = stageId !== undefined && stageIdSet.has(stageId);
 							const textMatch =
-								stageText !== undefined && stageTextSet.has(stageText.toLowerCase());
+								stageText !== undefined &&
+								stageTextSet.has(stageText.toLowerCase());
 							if (!idMatch && !textMatch) return false;
 						}
 
@@ -221,37 +248,49 @@ export function registerSearchTools(server: McpServer, client: LeverClient): voi
 				const startIdx = (params.page - 1) * params.limit;
 				const pageResults = allCandidates.slice(startIdx, startIdx + params.limit);
 
-				trace("lever_advanced_search", `SUCCESS (${Date.now() - startTime}ms)`, { total: allCandidates.length });
+				trace("lever_advanced_search", `SUCCESS (${Date.now() - startTime}ms)`, {
+					total: allCandidates.length,
+				});
 
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({
-							total_matches: allCandidates.length,
-							page: params.page,
-							limit: params.limit,
-							results: pageResults.map(formatOpportunity),
-							// VAL-504: coverage is DERIVED -- complete only if the sweep
-							// reached the API's last page (hasNext:false). A defensive
-							// stuck-cursor break leaves this false (honest, possibly partial).
-							coverage: {
-								records_scanned: recordsScanned,
-								pages_scanned: pagesScanned,
-								complete: sawLastPage,
-							},
-						}, null, 2),
-					}],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									total_matches: allCandidates.length,
+									page: params.page,
+									limit: params.limit,
+									results: pageResults.map(formatOpportunity),
+									// VAL-504: coverage is DERIVED -- complete only if the sweep
+									// reached the API's last page (hasNext:false). A defensive
+									// stuck-cursor break leaves this false (honest, possibly partial).
+									coverage: {
+										records_scanned: recordsScanned,
+										pages_scanned: pagesScanned,
+										complete: sawLastPage,
+									},
+								},
+								null,
+								2,
+							),
+						},
+					],
 				};
 			} catch (error) {
 				trace("lever_advanced_search", `ERROR (${Date.now() - startTime}ms)`, error);
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-					}],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
 				};
 			}
-		}
+		},
 	);
 }
 
@@ -273,28 +312,38 @@ function registerCandidateTools(server: McpServer, client: LeverClient): void {
 
 				if (!response?.data) {
 					return {
-						content: [{
-							type: "text",
-							text: JSON.stringify({ error: `Candidate ${params.opportunity_id} not found` }),
-						}],
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									error: `Candidate ${params.opportunity_id} not found`,
+								}),
+							},
+						],
 					};
 				}
 
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify(formatOpportunity(response.data), null, 2),
-					}],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(formatOpportunity(response.data), null, 2),
+						},
+					],
 				};
 			} catch (error) {
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-					}],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
 				};
 			}
-		}
+		},
 	);
 
 	// lever_archive (consolidated: list_reasons + archive + search) is in additional-tools.ts
@@ -308,7 +357,10 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 		"lever_list_open_roles",
 		"List every published (open) job posting, optionally expanded with owner and hiring-manager details.",
 		{
-			expand_owners: z.boolean().default(true).describe("Include posting owner and hiring manager details"),
+			expand_owners: z
+				.boolean()
+				.default(true)
+				.describe("Include posting owner and hiring manager details"),
 		},
 		async (params): Promise<McpToolResponse> => {
 			trace("lever_list_open_roles", "START", params);
@@ -319,30 +371,40 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 				// VAL-103: paginate ALL published postings (no single-fetch cap)
 				// so no open role is silently dropped. Sequential awaits are
 				// correct -- the client token bucket handles rate limiting + 429s.
-				const { items: allRoles } = await collectAllPages<LeverPosting>(
-					(offset) => client.getPostings("published", 100, offset, expandFields),
+				const { items: allRoles } = await collectAllPages<LeverPosting>((offset) =>
+					client.getPostings("published", 100, offset, expandFields),
 				);
 
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({
-							count: allRoles.length,
-							hasMore: false,
-							includes_owner_data: params.expand_owners,
-							roles: allRoles.map(formatPosting),
-						}, null, 2),
-					}],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									count: allRoles.length,
+									hasMore: false,
+									includes_owner_data: params.expand_owners,
+									roles: allRoles.map(formatPosting),
+								},
+								null,
+								2,
+							),
+						},
+					],
 				};
 			} catch (error) {
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-					}],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
 				};
 			}
-		}
+		},
 	);
 
 	server.tool(
@@ -351,7 +413,9 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 		{
 			owner_name: z.string().optional().describe("Name of the posting owner (partial match)"),
 			owner_id: z.string().optional().describe("Owner ID"),
-			state: z.enum(["published", "closed", "draft", "pending", "rejected"]).default("published"),
+			state: z
+				.enum(["published", "closed", "draft", "pending", "rejected"])
+				.default("published"),
 			limit: z.number().default(50),
 		},
 		async (params): Promise<McpToolResponse> => {
@@ -360,24 +424,31 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 			try {
 				if (!params.owner_name && !params.owner_id) {
 					return {
-						content: [{
-							type: "text",
-							text: JSON.stringify({ error: "Either owner_name or owner_id is required" }),
-						}],
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									error: "Either owner_name or owner_id is required",
+								}),
+							},
+						],
 					};
 				}
 
 				let postings: LeverPosting[];
 
 				if (params.owner_name) {
-					const response = await client.getPostingsByOwner(params.owner_name, params.state);
+					const response = await client.getPostingsByOwner(
+						params.owner_name,
+						params.state,
+					);
 					postings = response.data;
 				} else {
 					// VAL-103: paginate ALL postings (no single-fetch cap) then
 					// filter by owner id, just like the owner_name path. Returns
 					// every match -- no slice truncation.
-					const { items: allPostings } = await collectAllPages<LeverPosting>(
-						(offset) => client.getPostings(params.state, 100, offset, ["owner"]),
+					const { items: allPostings } = await collectAllPages<LeverPosting>((offset) =>
+						client.getPostings(params.state, 100, offset, ["owner"]),
 					);
 
 					postings = allPostings.filter((p: LeverPosting) => {
@@ -387,22 +458,32 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 				}
 
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({
-							count: postings.length,
-							postings: postings.map(formatPosting),
-						}, null, 2),
-					}],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									count: postings.length,
+									postings: postings.map(formatPosting),
+								},
+								null,
+								2,
+							),
+						},
+					],
 				};
 			} catch (error) {
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-					}],
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						},
+					],
 				};
 			}
-		}
+		},
 	);
 }

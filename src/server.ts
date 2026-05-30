@@ -5,7 +5,7 @@
  * Uses the MCP SDK's StreamableHTTP transport with OAuth 2.1 authentication.
  */
 
-import express, { Request, Response, NextFunction } from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -28,7 +28,7 @@ const pkg = require("../package.json");
 const SERVER_VERSION = pkg.version as string;
 
 // Configuration
-const PORT = parseInt(process.env.PORT || "8080", 10);
+const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 const LEVER_API_KEY = process.env.LEVER_API_KEY;
 
 // MCP Protocol Version
@@ -56,7 +56,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 		res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD");
 		res.setHeader(
 			"Access-Control-Allow-Headers",
-			"Content-Type, Authorization, MCP-Session-Id, MCP-Protocol-Version"
+			"Content-Type, Authorization, MCP-Session-Id, MCP-Protocol-Version",
 		);
 	}
 
@@ -226,8 +226,7 @@ app.all("/mcp", async (req: Request, res: Response) => {
 		const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
 		if (!token) {
 			const resourceMetadataUrl = getResourceMetadataUrl(req);
-			res
-				.status(401)
+			res.status(401)
 				.header("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`)
 				.json({ error: "unauthorized", message: "Bearer token required" });
 			return;
@@ -241,8 +240,7 @@ app.all("/mcp", async (req: Request, res: Response) => {
 			logger.debug(`[MCP] authenticated user: ${authInfo.extra?.email}`);
 		} catch (e) {
 			const resourceMetadataUrl = getResourceMetadataUrl(req);
-			res
-				.status(401)
+			res.status(401)
 				.header("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`)
 				.json({ error: "invalid_token", message: String((e as Error).message) });
 			return;
@@ -324,7 +322,8 @@ app.get("/sse", (_req: Request, res: Response) => {
 	res.status(410).json({
 		error: "SSE endpoint deprecated",
 		message: "Use /mcp endpoint with Streamable HTTP transport",
-		documentation: "https://spec.modelcontextprotocol.io/specification/basic/transports/#streamable-http",
+		documentation:
+			"https://spec.modelcontextprotocol.io/specification/basic/transports/#streamable-http",
 	});
 });
 
