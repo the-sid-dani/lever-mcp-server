@@ -10,7 +10,7 @@ A remote MCP (Model Context Protocol) server that exposes the Lever ATS API as t
 
 **Live URL:** `https://lever-mcp-201626763325.us-central1.run.app/mcp`
 
-**Active refactor:** Jira Epic [ATF-476](https://sambatv.atlassian.net/browse/ATF-476). 14 Stories (ATF-477 through ATF-490) map to the milestones in system-design.md §9.
+**v3 refactor: SHIPPED.** Jira Epic [ATF-476](https://sambatv.atlassian.net/browse/ATF-476), 14 Stories (ATF-477–490). v3 merged to `main` + deployed 2026-05-29 (rev `lever-mcp-00028-gmm`). See the milestone table below for what's done vs the remaining follow-ups.
 
 ---
 
@@ -68,6 +68,8 @@ When making any code change, run `npm test` (full vitest suite), NOT scoped `npm
 
 `npm run eval:schema` is a Layer-0 static contract check (all 17 tools registered, non-empty descriptions, valid schemas, golden-task tool names resolve). It needs no secrets and runs in ~1s. It is a HARD gate in GitHub Actions CI (runs right after `npm test`), so a contract regression blocks merge to main — and since deploy only happens manually off green main, it gates deploy. The recall false-negative regression (`src/__tests__/recall-regression.test.ts`) runs inside `npm test`. Full eval plan + deferred layers: `evals/README.md`.
 
+**Agent-driven evals (`npm run eval:agent`):** a real headless `claude` agent drives the MCP tools against a live local server and a unit-tested grader (`evals/agent/grade.ts`, selfcheck via `npx tsx evals/agent/selfcheck.ts`) scores tool-selection + function. Needs `~/.second-brain-os.env` (LEVER_API_KEY) + the `claude` CLI, so it is a LOCAL/nightly suite, NOT a CI gate. Inject real IDs via `EVAL_OPP_ID`/`EVAL_EMAIL`/`EVAL_POSTING_ID`. This layer caught a live `lever_archive` 400 (invalid `expand=posting`) that the unit tests missed — it is the behavioral complement to the deterministic `eval:schema` gate.
+
 ### Convention: use `mcp__fastedit__fast_edit` for `.ts` files, not `Edit`
 
 A project-level hook may block the `Edit` tool on `.ts` files. Use `mcp__fastedit__fast_edit` instead. If that fails (object literals, multi-statement insertions, files > 150 LOC), fall back to a Python heredoc via `Bash`:
@@ -93,9 +95,12 @@ Markdown, JSON, YAML, and config files are safe with `Edit`.
 ```
 src/
 ├── server.ts                 # Cloud Run entry, Express setup, MCP transport wiring
-├── tools.ts                  # registerAllTools — dispatch to additional + interview tools
-├── additional-tools.ts       # 11 tool registrations including 5 consolidated action-enum tools (split into src/tools/ in v3 M3a)
+├── tools.ts                  # registerAllTools + 4 tools (advanced_search, get_candidate, list_open_roles, find_postings_by_owner)
+├── additional-tools.ts       # aggregator — fans the shared client out to src/tools/*.ts (M3a split DONE)
+├── tools/                    # domain-split tool modules: search, candidates, requisitions, archive, users, notes, feedback, stages, formatters
 ├── interview-tools.ts        # 2 interview-specific tool registrations
+├── utils/                    # paginate.ts (collectAllPages), concurrency.ts (mapLimit), logger.ts, stage-helpers.ts
+├── auth/                     # google-oauth-broker, google-verifier, token-store, perform-as-resolver, request-context, resolve-perform-as
 ├── lever/
 │   └── client.ts             # LeverClient — REST wrapper, rate limit, pagination
 ├── auth/
@@ -250,7 +255,7 @@ npm run deploy
 
 Env vars are set via Cloud Run service config (NOT in `.env` files in production):
 
-- `LEVER_API_KEY` — Lever admin > Integrations & API. Rotated in v3 M7.
+- `LEVER_API_KEY` — Lever admin > Integrations & API. Stored in GCP Secret Manager (`lever-api-key`), injected at deploy. Never in the repo; no rotation outstanding (ATF-489's "key rotation" is stale text).
 - `LEVER_DEFAULT_USER_ID` — Sid's Lever user UUID. Fallback only (see auth model above).
 - `OAUTH_ENABLED=true`
 - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` — self-serve Google OAuth Web client (see [`docs/google-oauth-setup.md`](./docs/google-oauth-setup.md)).
@@ -273,22 +278,26 @@ Pre-refactor tag `pre-refactor-2026-05-22` available as the absolute fallback.
 
 The 14-milestone v3 refactor is tracked at [ATF-476](https://sambatv.atlassian.net/browse/ATF-476). Working branch: `refactor/v3`.
 
+**Status as of 2026-05-29:** v3 is MERGED to `main` (PR #10, `ec00c96`) and DEPLOYED to prod (Cloud Run rev `lever-mcp-00028-gmm`). R1-R5 production-grade work + a review-driven cleanup shipped on top.
+
 | Milestone | Status | Story |
 |---|---|---|
 | M0a — Pre-flight | ✅ Complete | [ATF-477](https://sambatv.atlassian.net/browse/ATF-477) |
-| M0b — Google OAuth broker port (self-serve, no IT) | ⏳ Pending build | [ATF-478](https://sambatv.atlassian.net/browse/ATF-478) |
+| M0b — Google OAuth broker port (self-serve, no IT) | ✅ Complete (built + live; OAuth enabled in prod) | [ATF-478](https://sambatv.atlassian.net/browse/ATF-478) |
 | M1 — Dead code + SDK bump + lever_get_users | ✅ Complete | [ATF-479](https://sambatv.atlassian.net/browse/ATF-479) |
-| M1.5 — MCP protocol 2025-11-25 audit | ⏳ Pending | [ATF-480](https://sambatv.atlassian.net/browse/ATF-480) |
+| M1.5 — MCP protocol 2025-11-25 audit | ⏳ Pending (still pinned 2025-06-18) | [ATF-480](https://sambatv.atlassian.net/browse/ATF-480) |
 | M2 — Docs reality-check | ✅ Complete | [ATF-481](https://sambatv.atlassian.net/browse/ATF-481) |
-| M2.5 — GitHub Actions CI | ✅ Complete (hard-gate type-check + test; lint/format soft until M3a) | [ATF-482](https://sambatv.atlassian.net/browse/ATF-482) |
-| M2.6 — Deploy automation | ⏳ Pending | [ATF-483](https://sambatv.atlassian.net/browse/ATF-483) |
-| M3a — File split | ⏳ Pending | [ATF-484](https://sambatv.atlassian.net/browse/ATF-484) |
-| M3b — perform_as resolver (fed by broker email) | ⏳ Blocked on M0b | [ATF-485](https://sambatv.atlassian.net/browse/ATF-485) |
-| M4 — Test coverage | ⏳ Pending | [ATF-486](https://sambatv.atlassian.net/browse/ATF-486) |
-| M5 — 5 feedback tools | ⏳ Blocked on M3b | [ATF-487](https://sambatv.atlassian.net/browse/ATF-487) |
-| M6 — 3 webhook tools | ⏳ Blocked on M3b | [ATF-488](https://sambatv.atlassian.net/browse/ATF-488) |
-| M7 — Prod cutover + key rotation | ⏳ Blocked on M5/M6/M0b | [ATF-489](https://sambatv.atlassian.net/browse/ATF-489) |
+| M2.5 — GitHub Actions CI | ✅ Complete (type-check + test + eval:schema + **lint/format now hard gates**) | [ATF-482](https://sambatv.atlassian.net/browse/ATF-482) |
+| M2.6 — Deploy automation | ⏳ Pending (deploy still manual `npm run deploy`) | [ATF-483](https://sambatv.atlassian.net/browse/ATF-483) |
+| M3a — File split | ✅ Complete (tools live in `src/tools/`) | [ATF-484](https://sambatv.atlassian.net/browse/ATF-484) |
+| M3b — perform_as resolver (fed by broker email) | ✅ Complete (resolver + AsyncLocalStorage; fail-loud live) | [ATF-485](https://sambatv.atlassian.net/browse/ATF-485) |
+| M4 — Test coverage | ✅ Complete (142 tests + eval:schema + agent-eval) | [ATF-486](https://sambatv.atlassian.net/browse/ATF-486) |
+| M5 — feedback tools | ✅ Complete (consolidated `lever_feedback`) | [ATF-487](https://sambatv.atlassian.net/browse/ATF-487) |
+| M6 — 3 webhook tools | ⏳ Pending (not built — no webhook ingestion) | [ATF-488](https://sambatv.atlassian.net/browse/ATF-488) |
+| M7 — Prod cutover | ✅ Complete (deployed 2026-05-29). NOTE: ATF-489's "key rotation" is stale — the key lives in GCP Secret Manager (`lever-api-key`), was never leaked, nothing to rotate. | [ATF-489](https://sambatv.atlassian.net/browse/ATF-489) |
 | M8 (optional) — Stage + user polish | ⏳ Pending | [ATF-490](https://sambatv.atlassian.net/browse/ATF-490) |
+
+**Open follow-ups (post-review):** M1.5 protocol bump; M2.6 deploy automation; M6 webhooks; Firestore token TTL sweep; DCR `/register` redirect allowlist; OAuth 1h token-refresh (currently re-auth on 401, by design); eliminate the remaining 140 `noExplicitAny` warnings (kept as non-failing `warn`).
 
 ---
 
@@ -305,11 +314,12 @@ The 14-milestone v3 refactor is tracked at [ATF-476](https://sambatv.atlassian.n
 
 ## Known limitations
 
-1. **Single-tenant `perform_as` until v3 M3b.** Writes attribute to `LEVER_DEFAULT_USER_ID` (Sid). Multi-tenant resolver lands in M3b.
-2. **MCP session state per-container memory.** Cloud Run revision swaps drop active MCP sessions; clients reconnect on next request.
-3. **No webhook ingestion sink.** v3 M6 ships registration only (3 tools). Inbound webhook persistence is a separate future project.
-4. **GitHub Actions CI is active.** Type-check and tests are hard gates; lint/format are report-only until M3a cleanup.
+1. **Multi-tenant `perform_as` is LIVE (M3b shipped).** Authenticated requests resolve the caller's email → their Lever user ID; unprovisioned authed users fail loud on writes (never silent `LEVER_DEFAULT_USER_ID`). OAuth-off (cron/internal) still uses `LEVER_DEFAULT_USER_ID`.
+2. **MCP session state per-container memory.** Cloud Run revision swaps drop active MCP sessions; clients reconnect on next request. Durable OAuth tokens persist (Firestore). At >1 instance the ~5-min login window can land on a different instance and fail (retry).
+3. **No webhook tools yet.** M6 (3 webhook registration tools) is not built. Inbound webhook persistence is a separate future project.
+4. **GitHub Actions CI gates:** type-check, test, eval:schema, **and biome lint/format (src/)** are all hard gates. `noExplicitAny` (140) stays a non-failing `warn`.
 5. **MCP-Protocol-Version pinned at `2025-06-18`.** v3 M1.5 bumps to `2025-11-25` after compliance audit.
+6. **OAuth tokens expire at 1h with no refresh (by design).** Clients re-run the Google flow on 401. Firestore expired-token sweep (TTL) is a pending follow-up.
 
 ---
 
