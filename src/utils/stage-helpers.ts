@@ -1,4 +1,5 @@
 import type { LeverClient } from "../lever/client.js";
+import type { LeverStage } from "../types/lever.js";
 
 /**
  * Resolves stage identifiers (names or IDs) to stage IDs
@@ -21,7 +22,7 @@ export async function resolveStageIdentifier(
 
 	// Create a map of lowercase stage names to IDs for efficient lookup
 	const stageMap = new Map<string, string>(
-		stages.data.map((s: any) => [s.text.toLowerCase(), s.id]),
+		stages.data.map((s: LeverStage) => [(s.text ?? "").toLowerCase(), s.id]),
 	);
 
 	// Ensure we're working with an array
@@ -68,28 +69,4 @@ export async function resolveSingleStageIdentifier(
 ): Promise<string> {
 	const results = await resolveStageIdentifier(client, identifier);
 	return results[0]!;
-}
-
-/**
- * Gets a map of stage IDs to stage names
- * Useful for displaying human-readable stage names
- *
- * @param client - The Lever API client
- * @returns Map of stage IDs to stage names
- */
-export async function getStageIdToNameMap(client: LeverClient): Promise<Map<string, string>> {
-	const stages = await client.getStages();
-	return new Map<string, string>(stages.data.map((s: any) => [s.id, s.text]));
-}
-
-/**
- * Gets a map of lowercase stage names to stage IDs
- * Useful for bulk operations
- *
- * @param client - The Lever API client
- * @returns Map of lowercase stage names to stage IDs
- */
-export async function getStageNameToIdMap(client: LeverClient): Promise<Map<string, string>> {
-	const stages = await client.getStages();
-	return new Map<string, string>(stages.data.map((s: any) => [s.text.toLowerCase(), s.id]));
 }

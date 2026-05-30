@@ -13,12 +13,12 @@ export interface LeverOpportunity {
 	updatedAt?: number;
 	resume?: string;
 	resumeId?: string;
-	files?: any[];
+	files?: unknown[];
 	applications?: any[];
 	origin?: string;
 	sources?: string[];
-	archived?: boolean | any;
-	owner?: { name?: string; id?: string } | any;
+	archived?: boolean;
+	owner?: string | { id?: string; name?: string; email?: string };
 	links?: string[];
 	phones?: { type?: string; value?: string }[] | string[];
 }
@@ -36,7 +36,7 @@ export interface LeverPosting {
 	// Add other useful fields available in the API
 	distributionChannels?: string[];
 	confidentiality?: string;
-	followers?: string[] | any[];
+	followers?: string[];
 	reqCode?: string;
 	requisitionCodes?: string[];
 	workplaceType?: string;

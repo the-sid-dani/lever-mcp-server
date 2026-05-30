@@ -382,7 +382,6 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 							text: JSON.stringify(
 								{
 									count: allRoles.length,
-									hasMore: false,
 									includes_owner_data: params.expand_owners,
 									roles: allRoles.map(formatPosting),
 								},
@@ -416,7 +415,6 @@ function registerUtilityTools(server: McpServer, client: LeverClient): void {
 			state: z
 				.enum(["published", "closed", "draft", "pending", "rejected"])
 				.default("published"),
-			limit: z.number().default(50),
 		},
 		async (params): Promise<McpToolResponse> => {
 			trace("lever_find_postings_by_owner", "START", params);
