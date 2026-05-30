@@ -5,7 +5,7 @@
  * Uses the MCP SDK's StreamableHTTP transport with OAuth 2.1 authentication.
  */
 
-import express, { Request, Response, NextFunction } from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -28,7 +28,7 @@ const pkg = require("../package.json");
 const SERVER_VERSION = pkg.version as string;
 
 // Configuration
-const PORT = parseInt(process.env.PORT || "8080", 10);
+const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 const LEVER_API_KEY = process.env.LEVER_API_KEY;
 
 // MCP Protocol Version
@@ -56,7 +56,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 		res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD");
 		res.setHeader(
 			"Access-Control-Allow-Headers",
-			"Content-Type, Authorization, MCP-Session-Id, MCP-Protocol-Version"
+			"Content-Type, Authorization, MCP-Session-Id, MCP-Protocol-Version",
 		);
 	}
 
@@ -226,8 +226,7 @@ app.all("/mcp", async (req: Request, res: Response) => {
 		const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
 		if (!token) {
 			const resourceMetadataUrl = getResourceMetadataUrl(req);
-			res
-				.status(401)
+			res.status(401)
 				.header("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`)
 				.json({ error: "unauthorized", message: "Bearer token required" });
 			return;
@@ -241,8 +240,7 @@ app.all("/mcp", async (req: Request, res: Response) => {
 			logger.debug(`[MCP] authenticated user: ${authInfo.extra?.email}`);
 		} catch (e) {
 			const resourceMetadataUrl = getResourceMetadataUrl(req);
-			res
-				.status(401)
+			res.status(401)
 				.header("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`)
 				.json({ error: "invalid_token", message: String((e as Error).message) });
 			return;
@@ -278,7 +276,9 @@ app.all("/mcp", async (req: Request, res: Response) => {
 		return;
 	}
 
-	// Handle the request
+	// Handle the request. Track whether a new-session transport was stored so the
+	// catch block can release an orphaned (connected-but-unstored) transport.
+	let storedNewTransport = false;
 	try {
 		await runWithRequestContext({ email: authedEmail }, () =>
 			transport.handleRequest(req, res, req.body),
@@ -290,6 +290,7 @@ app.all("/mcp", async (req: Request, res: Response) => {
 			const newSessionId = transport.sessionId;
 			if (newSessionId && !transports.has(newSessionId)) {
 				transports.set(newSessionId, transport);
+				storedNewTransport = true;
 
 				// Clean up on close
 				transport.onclose = () => {
@@ -302,6 +303,14 @@ app.all("/mcp", async (req: Request, res: Response) => {
 		}
 	} catch (error) {
 		logger.error(`[MCP] Error handling request: ${(error as Error)?.message ?? "unknown"}`);
+		// Leak guard: a new session created + connect()ed a transport before
+		// handleRequest. If handleRequest threw, that transport is connected but
+		// was never stored in the map (no onclose wired) and would leak. Close it
+		// here. Do NOT close a transport that was successfully stored (its
+		// lifecycle is managed via onclose) or a reused existing transport.
+		if (isNewSession && !storedNewTransport) {
+			transport.close?.();
+		}
 		if (!res.headersSent) {
 			res.status(500).json({ error: "Internal server error" });
 		}
@@ -313,12 +322,13 @@ app.get("/sse", (_req: Request, res: Response) => {
 	res.status(410).json({
 		error: "SSE endpoint deprecated",
 		message: "Use /mcp endpoint with Streamable HTTP transport",
-		documentation: "https://spec.modelcontextprotocol.io/specification/basic/transports/#streamable-http",
+		documentation:
+			"https://spec.modelcontextprotocol.io/specification/basic/transports/#streamable-http",
 	});
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
 	console.log(
 		JSON.stringify({
 			event: "server_started",
@@ -332,19 +342,35 @@ app.listen(PORT, () => {
 	);
 });
 
-// Graceful shutdown
-process.on("SIGTERM", () => {
-	console.log("SIGTERM received, shutting down gracefully...");
+// Graceful shutdown - SIGTERM and SIGINT share the same path: stop accepting
+// new connections (drain in-flight via server.close), close all active MCP
+// transports, clear the session map, then exit. A short grace timeout guards
+// against server.close() never firing so we never hang forever.
+let shuttingDown = false;
+function shutdown(signal: string): void {
+	if (shuttingDown) {
+		return;
+	}
+	shuttingDown = true;
+	console.log(`${signal} received, shutting down gracefully...`);
+
 	// Close all active transports
 	for (const [sessionId, transport] of transports) {
 		console.log(`Closing session: ${sessionId}`);
 		transport.close?.();
 	}
 	transports.clear();
-	process.exit(0);
-});
 
-process.on("SIGINT", () => {
-	console.log("SIGINT received, shutting down gracefully...");
-	process.exit(0);
-});
+	// Stop accepting new connections and drain in-flight requests, then exit.
+	// Best-effort: a short timeout fallback guarantees exit even if the close
+	// callback never fires.
+	const forceExit = setTimeout(() => process.exit(0), 5_000);
+	forceExit.unref?.();
+	server.close(() => {
+		clearTimeout(forceExit);
+		process.exit(0);
+	});
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

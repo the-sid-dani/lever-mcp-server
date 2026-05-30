@@ -25,9 +25,7 @@ export function formatOpportunity(opp: LeverOpportunity): Record<string, any> {
 			: String(opp.stage || "Unknown");
 
 	const postingText =
-		opp.posting && typeof opp.posting === "object"
-			? opp.posting.text
-			: "Unknown";
+		opp.posting && typeof opp.posting === "object" ? opp.posting.text : "Unknown";
 
 	// Location is a string in the API, not an object
 	const location = opp.location || "Unknown";

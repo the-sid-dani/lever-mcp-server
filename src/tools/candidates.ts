@@ -19,29 +19,25 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 
 				// Try files endpoint
 				try {
-					const filesResponse = await client.getOpportunityFiles(
-						args.opportunity_id,
-					);
+					const filesResponse = await client.getOpportunityFiles(args.opportunity_id);
 					const files = filesResponse.data || [];
 					for (const f of files) {
 						f.source = "files";
 					}
 					allFiles.push(...files);
-				} catch (filesError) {
+				} catch {
 					// Continue even if files endpoint fails
 				}
 
 				// Try resumes endpoint
 				try {
-					const resumesResponse = await client.getOpportunityResumes(
-						args.opportunity_id,
-					);
+					const resumesResponse = await client.getOpportunityResumes(args.opportunity_id);
 					const resumes = resumesResponse.data || [];
 					for (const r of resumes) {
 						r.source = "resumes";
 					}
 					allFiles.push(...resumes);
-				} catch (resumesError) {
+				} catch {
 					// Continue even if resumes endpoint fails
 				}
 
@@ -58,10 +54,7 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 						type: f.file?.ext || f.type || f.mimetype || "Unknown",
 						size: f.file?.size || f.size || 0,
 						uploaded_at: f.createdAt
-							? new Date(f.createdAt)
-									.toISOString()
-									.replace("T", " ")
-									.substring(0, 16)
+							? new Date(f.createdAt).toISOString().replace("T", " ").substring(0, 16)
 							: "Unknown",
 						download_url: f.file?.downloadUrl || f.downloadUrl || f.url || "",
 						source: f.source || "unknown",
@@ -105,9 +98,7 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 				const opportunity = oppResponse.data;
 
 				// Get applications
-				const response = await client.getOpportunityApplications(
-					args.opportunity_id,
-				);
+				const response = await client.getOpportunityApplications(args.opportunity_id);
 				const applications = response.data || [];
 
 				const results = {
@@ -165,13 +156,11 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 		},
 		async (args) => {
 			try {
-				const updates: any = {};
-
 				// Handle stage update by name
 				if (args.stage_name && !args.stage_id) {
 					const stages = await client.getStages();
 					const stage = stages.data.find((s: any) =>
-						s.text.toLowerCase().includes(args.stage_name!.toLowerCase())
+						s.text.toLowerCase().includes(args.stage_name!.toLowerCase()),
 					);
 					if (stage) {
 						args.stage_id = stage.id;
@@ -180,9 +169,21 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 					}
 				}
 
+				// owner reassignment is not yet implemented (no LeverClient method).
+				// Fail loud rather than returning a misleading success response.
+				if (args.owner_id) {
+					throw new Error(
+						"owner reassignment is not yet implemented (no LeverClient method)",
+					);
+				}
+
 				// Resolve perform_as ONLY if there is a write to perform (avoid throwing
 				// on a no-op call). Every write below must attach perform_as or Lever 400s.
-				const hasWrite = !!(args.stage_id || args.add_tags?.length || args.remove_tags?.length);
+				const hasWrite = !!(
+					args.stage_id ||
+					args.add_tags?.length ||
+					args.remove_tags?.length
+				);
 				const performAs = hasWrite
 					? await resolvePerformAs(getSharedResolver(client))
 					: undefined;
@@ -191,28 +192,34 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 				const results = [];
 
 				if (args.stage_id) {
-					await client.updateOpportunityStage(args.opportunity_id, args.stage_id, performAs);
+					await client.updateOpportunityStage(
+						args.opportunity_id,
+						args.stage_id,
+						performAs,
+					);
 					results.push({ action: "stage_updated", stage_id: args.stage_id });
-				}
-
-				if (args.owner_id) {
-					// Note: This would need a new method in LeverClient
-					// await client.updateOpportunityOwner(args.opportunity_id, args.owner_id);
-					results.push({ action: "owner_updated", owner_id: args.owner_id, note: "Owner update not yet implemented in LeverClient" });
 				}
 
 				if (args.add_tags || args.remove_tags) {
 					// Handle tag updates
 					if (args.add_tags && args.add_tags.length > 0) {
-						await client.addCandidateTags(args.opportunity_id, args.add_tags, performAs);
+						await client.addCandidateTags(
+							args.opportunity_id,
+							args.add_tags,
+							performAs,
+						);
 					}
 					if (args.remove_tags && args.remove_tags.length > 0) {
-						await client.removeCandidateTags(args.opportunity_id, args.remove_tags, performAs);
+						await client.removeCandidateTags(
+							args.opportunity_id,
+							args.remove_tags,
+							performAs,
+						);
 					}
 					results.push({
 						action: "tags_updated",
 						added: args.add_tags || [],
-						removed: args.remove_tags || []
+						removed: args.remove_tags || [],
 					});
 				}
 
@@ -221,31 +228,40 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 				const opportunity = opportunityResponse.data;
 
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({
-							success: true,
-							opportunity_id: args.opportunity_id,
-							candidate_name: opportunity.name || "Unknown",
-							current_stage: typeof opportunity.stage === 'object' && opportunity.stage
-								? opportunity.stage.text
-								: "Unknown",
-							updates: results
-						}, null, 2)
-					}]
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									success: true,
+									opportunity_id: args.opportunity_id,
+									candidate_name: opportunity.name || "Unknown",
+									current_stage:
+										typeof opportunity.stage === "object" && opportunity.stage
+											? opportunity.stage.text
+											: "Unknown",
+									updates: results,
+								},
+								null,
+								2,
+							),
+						},
+					],
 				};
 			} catch (error) {
 				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({
-							error: error instanceof Error ? error.message : String(error),
-							opportunity_id: args.opportunity_id
-						})
-					}]
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								error: error instanceof Error ? error.message : String(error),
+								opportunity_id: args.opportunity_id,
+							}),
+						},
+					],
 				};
 			}
-		}
+		},
 	);
 
 	// lever_list_emails — VAL-019 (M1.7) — read email thread history for a candidate
@@ -269,21 +285,25 @@ export function registerCandidateTools(server: McpServer, client: LeverClient) {
 					content: [
 						{
 							type: "text",
-							text: JSON.stringify({
-								count: allEmails.length,
-								emails: allEmails.map((email: any) => ({
-									id: email.id,
-									subject: email.subject || "",
-									fromContact: email.fromContact || null,
-									to: email.to || [],
-									cc: email.cc || [],
-									bcc: email.bcc || [],
-									body: email.body || email.bodyText || "",
-									user: email.user || null,
-									createdAt: email.createdAt || email.sentAt || null,
-									threadId: email.threadId || null,
-								})),
-							}, null, 2),
+							text: JSON.stringify(
+								{
+									count: allEmails.length,
+									emails: allEmails.map((email: any) => ({
+										id: email.id,
+										subject: email.subject || "",
+										fromContact: email.fromContact || null,
+										to: email.to || [],
+										cc: email.cc || [],
+										bcc: email.bcc || [],
+										body: email.body || email.bodyText || "",
+										user: email.user || null,
+										createdAt: email.createdAt || email.sentAt || null,
+										threadId: email.threadId || null,
+									})),
+								},
+								null,
+								2,
+							),
 						},
 					],
 				};

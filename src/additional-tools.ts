@@ -20,10 +20,7 @@ export { formatOpportunity } from "./tools/formatters.js";
  * that instance) and fans it out to each domain's register function. All domain
  * modules share the same client instance — no per-module LeverClient is created.
  */
-export function registerAdditionalTools(
-	server: McpServer,
-	client: LeverClient,
-) {
+export function registerAdditionalTools(server: McpServer, client: LeverClient) {
 	registerSearchTools(server, client);
 	registerCandidateTools(server, client);
 	registerRequisitionTools(server, client);

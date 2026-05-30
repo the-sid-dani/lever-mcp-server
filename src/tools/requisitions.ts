@@ -9,19 +9,57 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 		"lever_requisitions",
 		"Read job requisition data. Use action='list' to fetch requisitions filtered by status / requisition_code / date range / confidentiality, or action='get' to fetch full details for one requisition by either its Lever UUID or its external requisition_code (smart lookup — tries UUID-shape first, falls back to code lookup).",
 		{
-			action: z.enum(["list", "get"]).describe(
-				"Operation to perform. list=fetch requisitions with optional filters; get=fetch full details for a single requisition by ID or code."
-			),
+			action: z
+				.enum(["list", "get"])
+				.describe(
+					"Operation to perform. list=fetch requisitions with optional filters; get=fetch full details for a single requisition by ID or code.",
+				),
 			// list action params
-			status: z.enum(["open", "closed", "onHold", "draft"]).optional().describe("For action='list' only — filter by requisition status."),
-			requisition_code: z.string().optional().describe("For action='list' only — filter by external HRIS requisition code (e.g., 'ENG-145'). Use action='get' with requisition_identifier if you want the full record for a specific code."),
-			created_at_start: z.number().optional().describe("For action='list' only — filter by creation date (timestamp in milliseconds)."),
-			created_at_end: z.number().optional().describe("For action='list' only — filter by creation date (timestamp in milliseconds)."),
-			confidentiality: z.enum(["confidential", "non-confidential", "all"]).default("non-confidential").optional().describe("For action='list' only — filter by confidentiality level."),
-			limit: z.number().default(25).optional().describe("For action='list' only — number of results to return (max 100, capped via Math.min)."),
-			offset: z.string().optional().describe("For action='list' only — pagination offset token."),
+			status: z
+				.enum(["open", "closed", "onHold", "draft"])
+				.optional()
+				.describe("For action='list' only — filter by requisition status."),
+			requisition_code: z
+				.string()
+				.optional()
+				.describe(
+					"For action='list' only — filter by external HRIS requisition code (e.g., 'ENG-145'). Use action='get' with requisition_identifier if you want the full record for a specific code.",
+				),
+			created_at_start: z
+				.number()
+				.optional()
+				.describe(
+					"For action='list' only — filter by creation date (timestamp in milliseconds).",
+				),
+			created_at_end: z
+				.number()
+				.optional()
+				.describe(
+					"For action='list' only — filter by creation date (timestamp in milliseconds).",
+				),
+			confidentiality: z
+				.enum(["confidential", "non-confidential", "all"])
+				.default("non-confidential")
+				.optional()
+				.describe("For action='list' only — filter by confidentiality level."),
+			limit: z
+				.number()
+				.default(25)
+				.optional()
+				.describe(
+					"For action='list' only — number of results to return (max 100, capped via Math.min).",
+				),
+			offset: z
+				.string()
+				.optional()
+				.describe("For action='list' only — pagination offset token."),
 			// get action params
-			requisition_identifier: z.string().optional().describe("For action='get' only — either the Lever ID (UUID, 36 chars with hyphens) or the external requisition code (e.g., 'ENG-145'). Smart-lookup tries one then the other."),
+			requisition_identifier: z
+				.string()
+				.optional()
+				.describe(
+					"For action='get' only — either the Lever ID (UUID, 36 chars with hyphens) or the external requisition code (e.g., 'ENG-145'). Smart-lookup tries one then the other.",
+				),
 		},
 		async (args) => {
 			try {
@@ -65,16 +103,22 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 								department: req.department || "",
 								confidentiality: req.confidentiality || "",
 							},
-							compensation: req.compensationBand ? {
-								currency: req.compensationBand.currency || "",
-								min: req.compensationBand.min || 0,
-								max: req.compensationBand.max || 0,
-								interval: req.compensationBand.interval || "",
-							} : null,
+							compensation: req.compensationBand
+								? {
+										currency: req.compensationBand.currency || "",
+										min: req.compensationBand.min || 0,
+										max: req.compensationBand.max || 0,
+										interval: req.compensationBand.interval || "",
+									}
+								: null,
 							owner: req.owner || "",
 							hiring_manager: req.hiringManager || "",
-							created_at: req.createdAt ? new Date(req.createdAt).toISOString().split("T")[0] : "",
-							updated_at: req.updatedAt ? new Date(req.updatedAt).toISOString().split("T")[0] : "",
+							created_at: req.createdAt
+								? new Date(req.createdAt).toISOString().split("T")[0]
+								: "",
+							updated_at: req.updatedAt
+								? new Date(req.updatedAt).toISOString().split("T")[0]
+								: "",
 						}));
 
 						const result = {
@@ -98,7 +142,8 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 						};
 					}
 					case "get": {
-						if (!args.requisition_identifier) throw new Error("requisition_identifier is required for action='get'");
+						if (!args.requisition_identifier)
+							throw new Error("requisition_identifier is required for action='get'");
 
 						let requisition: any;
 						let lookupMethod: string;
@@ -121,8 +166,10 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 									const response = await client.getRequisitionByCode(identifier);
 									requisition = response.data;
 									lookupMethod = "code_lookup_fallback";
-								} catch (codeError) {
-									throw new Error(`Requisition not found using ID '${identifier}': ${error instanceof Error ? error.message : String(error)}`);
+								} catch {
+									throw new Error(
+										`Requisition not found using ID '${identifier}': ${error instanceof Error ? error.message : String(error)}`,
+									);
 								}
 							}
 						} else {
@@ -137,8 +184,10 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 									const response = await client.getRequisition(identifier);
 									requisition = response.data;
 									lookupMethod = "id_lookup_fallback";
-								} catch (idError) {
-									throw new Error(`Requisition not found using code '${identifier}': ${error instanceof Error ? error.message : String(error)}`);
+								} catch {
+									throw new Error(
+										`Requisition not found using code '${identifier}': ${error instanceof Error ? error.message : String(error)}`,
+									);
 								}
 							}
 						}
@@ -157,7 +206,9 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 								headcount: {
 									total: requisition.headcountTotal || 0,
 									hired: requisition.headcountHired || 0,
-									remaining: (requisition.headcountTotal || 0) - (requisition.headcountHired || 0),
+									remaining:
+										(requisition.headcountTotal || 0) -
+										(requisition.headcountHired || 0),
 								},
 								backfill: requisition.backfill || false,
 
@@ -169,12 +220,14 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 								confidentiality: requisition.confidentiality || "",
 
 								// Compensation
-								compensation_band: requisition.compensationBand ? {
-									currency: requisition.compensationBand.currency || "",
-									min: requisition.compensationBand.min || 0,
-									max: requisition.compensationBand.max || 0,
-									interval: requisition.compensationBand.interval || "",
-								} : null,
+								compensation_band: requisition.compensationBand
+									? {
+											currency: requisition.compensationBand.currency || "",
+											min: requisition.compensationBand.min || 0,
+											max: requisition.compensationBand.max || 0,
+											interval: requisition.compensationBand.interval || "",
+										}
+									: null,
 
 								// People
 								owner: requisition.owner || "",
@@ -194,9 +247,15 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 								internal_notes: requisition.internalNotes || "",
 
 								// Timestamps
-								created_at: requisition.createdAt ? new Date(requisition.createdAt).toISOString() : "",
-								updated_at: requisition.updatedAt ? new Date(requisition.updatedAt).toISOString() : "",
-								closed_at: requisition.closedAt ? new Date(requisition.closedAt).toISOString() : "",
+								created_at: requisition.createdAt
+									? new Date(requisition.createdAt).toISOString()
+									: "",
+								updated_at: requisition.updatedAt
+									? new Date(requisition.updatedAt).toISOString()
+									: "",
+								closed_at: requisition.closedAt
+									? new Date(requisition.closedAt).toISOString()
+									: "",
 							},
 						};
 
@@ -214,9 +273,12 @@ export function registerRequisitionTools(server: McpServer, client: LeverClient)
 				}
 			} catch (error) {
 				// Preserve the get-action note for backwards compatibility on lookup errors
-				const payload: any = { error: error instanceof Error ? error.message : String(error) };
+				const payload: any = {
+					error: error instanceof Error ? error.message : String(error),
+				};
 				if (args.action === "get") {
-					payload.note = "You can use either the Lever ID (UUID) or the external requisition code (e.g., 'ENG-145')";
+					payload.note =
+						"You can use either the Lever ID (UUID) or the external requisition code (e.g., 'ENG-145')";
 				}
 				return {
 					content: [

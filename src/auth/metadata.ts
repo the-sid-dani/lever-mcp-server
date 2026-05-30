@@ -9,10 +9,10 @@
  * @see https://datatracker.ietf.org/doc/rfc9728/
  */
 export interface ProtectedResourceMetadata {
-  resource: string;
-  authorization_servers: string[];
-  bearer_methods_supported: string[];
-  scopes_supported: string[];
+	resource: string;
+	authorization_servers: string[];
+	bearer_methods_supported: string[];
+	scopes_supported: string[];
 }
 
 /**
@@ -22,10 +22,10 @@ export interface ProtectedResourceMetadata {
  * @returns RFC 9728 compliant metadata
  */
 export function getProtectedResourceMetadata(resourceUrl: string): ProtectedResourceMetadata {
-  return {
-    resource: resourceUrl,
-    authorization_servers: [resourceUrl],
-    bearer_methods_supported: ['header'],
-    scopes_supported: ['openid', 'email'],
-  };
+	return {
+		resource: resourceUrl,
+		authorization_servers: [resourceUrl],
+		bearer_methods_supported: ["header"],
+		scopes_supported: ["openid", "email"],
+	};
 }

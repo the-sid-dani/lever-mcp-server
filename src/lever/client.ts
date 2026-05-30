@@ -23,42 +23,53 @@ import { collectAllPages } from "../utils/paginate.js";
 class TokenBucket {
 	private tokens: number;
 	private lastRefill: number = Date.now();
-	
+
 	constructor(
-		private maxTokens: number = 15, // Allow some burst capacity
-		private refillRate: number = 8   // 8 tokens per second (below 10 req/s limit)
+		private maxTokens = 15, // Allow some burst capacity
+		private refillRate = 8, // 8 tokens per second (below 10 req/s limit)
 	) {
 		this.tokens = maxTokens;
 	}
-	
+
 	async waitForToken(): Promise<void> {
 		this.refill();
-		
+
 		if (this.tokens < 1) {
 			// Calculate wait time needed for 1 token
 			const waitMs = ((1 - this.tokens) / this.refillRate) * 1000;
-			await new Promise(resolve => setTimeout(resolve, Math.ceil(waitMs)));
+			await new Promise((resolve) => setTimeout(resolve, Math.ceil(waitMs)));
 			return this.waitForToken(); // Retry after waiting
 		}
-		
+
 		this.tokens -= 1;
 	}
-	
+
 	private refill(): void {
 		const now = Date.now();
 		const elapsedSeconds = (now - this.lastRefill) / 1000;
 		const tokensToAdd = elapsedSeconds * this.refillRate;
-		
+
 		this.tokens = Math.min(this.maxTokens, this.tokens + tokensToAdd);
 		this.lastRefill = now;
 	}
 }
 
+// W5: valid expand values for GET /opportunities. Lever 400s on anything else
+// (e.g. "posting" -> "posting is not expandable"). We STRIP invalid values
+// rather than throw, so a caller passing an unsupported expand degrades
+// gracefully instead of failing the whole request.
+export const VALID_OPPORTUNITY_EXPANDS = [
+	"owner",
+	"applications",
+	"stage",
+	"contact",
+	"followers",
+	"sourcedBy",
+] as const;
+
 export class LeverClient {
 	private baseUrl = "https://api.lever.co/v1";
 	private requestQueue: Promise<unknown> = Promise.resolve();
-	private lastRequestTime = 0;
-	private minRequestInterval = 125; // 8 requests per second
 	private tokenBucket = new TokenBucket(); // Add token bucket for better rate limiting
 
 	constructor(private apiKey: string) {}
@@ -66,9 +77,6 @@ export class LeverClient {
 	private async rateLimit(): Promise<void> {
 		// Use token bucket instead of simple delay
 		await this.tokenBucket.waitForToken();
-		
-		// Still track last request time for logging
-		this.lastRequestTime = Date.now();
 	}
 
 	private async makeRequest<T>(
@@ -76,7 +84,7 @@ export class LeverClient {
 		endpoint: string,
 		params?: Record<string, unknown>,
 		body?: unknown,
-		retryCount: number = 0,
+		retryCount = 0,
 	): Promise<T> {
 		// Execute one HTTP attempt. Retries recurse on `attempt` (NOT back
 		// through the queue): the queue slot is already held for this logical
@@ -122,59 +130,107 @@ export class LeverClient {
 				});
 
 				const duration = Date.now() - startTime;
-				logger.debug(`[API-TRACE ${traceId}] Response: ${response.status} | Duration: ${duration}ms | Attempt: ${attemptCount + 1}`);
+				logger.debug(
+					`[API-TRACE ${traceId}] Response: ${response.status} | Duration: ${duration}ms | Attempt: ${attemptCount + 1}`,
+				);
 
 				if (!response.ok) {
-					
 					// Handle rate limiting specifically
 					if (response.status === 429) {
-						const retryAfter = response.headers.get('Retry-After');
-						const waitTime = retryAfter 
-							? parseInt(retryAfter) * 1000 
+						const retryAfter = response.headers.get("Retry-After");
+						const waitTime = retryAfter
+							? Number.parseInt(retryAfter, 10) * 1000
 							: Math.min(2 ** attemptCount * 1000, 30000); // Max 30s
-						
-						logger.warn(`Rate limited (429) on ${endpoint}. Waiting ${waitTime}ms before retry...`);
-						
+
+						logger.warn(
+							`Rate limited (429) on ${endpoint}. Waiting ${waitTime}ms before retry...`,
+						);
+
 						if (attemptCount < 3) {
-							await new Promise(resolve => setTimeout(resolve, waitTime));
+							await new Promise((resolve) => setTimeout(resolve, waitTime));
 							return attempt(attemptCount + 1);
 						}
-						
+
 						throw new Error(`Rate limit exceeded after ${attemptCount} retries`);
 					}
-					
+
 					// Retry on server errors (5xx) but not client errors (4xx)
 					if (response.status >= 500 && attemptCount < 2) {
-						logger.warn(`Lever API error ${response.status} on ${endpoint}, retrying... (attempt ${attemptCount + 1}/3)`);
+						logger.warn(
+							`Lever API error ${response.status} on ${endpoint}, retrying... (attempt ${attemptCount + 1}/3)`,
+						);
 						// Wait before retrying (exponential backoff)
-						await new Promise(resolve => setTimeout(resolve, 2 ** attemptCount * 1000));
+						await new Promise((resolve) =>
+							setTimeout(resolve, 2 ** attemptCount * 1000),
+						);
 						return attempt(attemptCount + 1);
 					}
-					
+
 					// Log 404 errors specifically
 					if (response.status === 404) {
 						logger.error(`Lever API 404: Resource not found at ${endpoint}`);
 					}
-					
+
+					// W4: for 4xx (NOT 429 — handled above, NOT 5xx — retried above),
+					// surface Lever's {code, message} which is non-PII + high-diagnostic
+					// (e.g. "posting is not expandable", "Missing required parameter:
+					// perform_as"). Guard the body read: it may be empty/non-JSON, in
+					// which case we fall back to the bare status+endpoint message. Only
+					// Lever's own code/message strings are appended — never candidate data.
+					if (response.status >= 400 && response.status < 500) {
+						try {
+							const errBody = await response.json();
+							const code =
+								typeof (errBody as { code?: unknown })?.code === "string"
+									? (errBody as { code: string }).code
+									: undefined;
+							const message =
+								typeof (errBody as { message?: unknown })?.message === "string"
+									? (errBody as { message: string }).message
+									: undefined;
+							if (message) {
+								throw new Error(
+									`Lever API error: ${response.status} on ${endpoint}: ${code ? `${code} - ` : ""}${message}`,
+								);
+							}
+						} catch (parseError) {
+							// Re-throw our own enriched error; swallow only JSON-parse failures.
+							if (
+								parseError instanceof Error &&
+								parseError.message.startsWith("Lever API error:")
+							) {
+								throw parseError;
+							}
+							// Empty/non-JSON body — fall through to the bare message below.
+						}
+					}
+
 					throw new Error(`Lever API error: ${response.status} on ${endpoint}`);
 				}
 
 				const responseData = await response.json();
-				
+
 				// Log if we get an empty response
-				if (!responseData || (typeof responseData === 'object' && Object.keys(responseData).length === 0)) {
+				if (
+					!responseData ||
+					(typeof responseData === "object" && Object.keys(responseData).length === 0)
+				) {
 					logger.debug(`Empty response from Lever API for ${endpoint}`);
 				}
-				
-				logger.debug(`[API-TRACE ${traceId}] SUCCESS | Total duration: ${Date.now() - startTime}ms`);
+
+				logger.debug(
+					`[API-TRACE ${traceId}] SUCCESS | Total duration: ${Date.now() - startTime}ms`,
+				);
 				return responseData as T;
 			} catch (error) {
 				// Treat a timeout/abort as a retryable error.
 				const isAbort = (error as Error)?.name === "AbortError";
-				const isNetwork = error instanceof TypeError && error.message.includes('fetch');
+				const isNetwork = error instanceof TypeError && error.message.includes("fetch");
 				if (attemptCount < 2 && (isNetwork || isAbort)) {
-					logger.warn(`${isAbort ? 'Request timed out' : 'Network error'} on ${endpoint}, retrying... (attempt ${attemptCount + 1}/3)`);
-					await new Promise(resolve => setTimeout(resolve, 2 ** attemptCount * 1000));
+					logger.warn(
+						`${isAbort ? "Request timed out" : "Network error"} on ${endpoint}, retrying... (attempt ${attemptCount + 1}/3)`,
+					);
+					await new Promise((resolve) => setTimeout(resolve, 2 ** attemptCount * 1000));
 					return attempt(attemptCount + 1);
 				}
 				if (isAbort) {
@@ -209,25 +265,43 @@ export class LeverClient {
 		email?: string;
 		tag?: string;
 		origin?: string;
+		archived?: boolean;
 		limit?: number;
 		offset?: string;
 		expand?: string[];
 	}): Promise<LeverApiResponse<LeverOpportunity>> {
 		// Default expand to include owner so recruiter data is always available
-		const expand = params.expand || ["owner"];
+		const requestedExpand = params.expand || ["owner"];
 		const { expand: _ignored, ...restParams } = params;
+
+		// W5: strip any expand value not on the /opportunities allowlist. Be
+		// lenient — log a debug warning for stripped values rather than throwing,
+		// so a caller passing an unsupported value (e.g. "posting") degrades
+		// gracefully instead of reintroducing the 400 ("posting is not expandable").
+		const validSet = new Set<string>(VALID_OPPORTUNITY_EXPANDS);
+		const expand = requestedExpand.filter((value) => {
+			if (validSet.has(value)) {
+				return true;
+			}
+			logger.debug(
+				`getOpportunities: stripping invalid expand value "${value}" (not in allowlist)`,
+			);
+			return false;
+		});
 
 		const response = await this.makeRequest<LeverApiResponse<LeverOpportunity>>(
 			"GET",
 			"/opportunities",
 			{ ...restParams, expand },
 		);
-		
+
 		// Debug logging
-		if (response && response.data && response.data.length > 0) {
-			logger.debug(`getOpportunities: Got ${response.data.length} candidates, first has name: ${response.data[0]!.name || 'NO_NAME'}`);
+		if (response?.data && response.data.length > 0) {
+			logger.debug(
+				`getOpportunities: Got ${response.data.length} candidates, first has name: ${response.data[0]!.name || "NO_NAME"}`,
+			);
 		}
-		
+
 		return response;
 	}
 
@@ -236,20 +310,20 @@ export class LeverClient {
 			// The API returns { data: opportunity } structure, so we expect that format
 			// Expand owner to get recruiter name instead of just a UUID
 			const response = await this.makeRequest<{ data: LeverOpportunity }>(
-			"GET",
-			`/opportunities/${id}`,
-			{ expand: ["owner"] },
-		);
-			
+				"GET",
+				`/opportunities/${id}`,
+				{ expand: ["owner"] },
+			);
+
 			// Check if the API returned null or undefined
 			if (!response || !response.data) {
 				logger.error(`API returned null/undefined for opportunity ${id}`);
 				throw new Error(`Opportunity ${id} not found - API returned empty response`);
 			}
-			
+
 			// Log successful fetch for debugging
 			logger.debug(`Successfully fetched opportunity ${id}, has data: ${!!response.data}`);
-			logger.debug(`Opportunity data:`, JSON.stringify(response).substring(0, 200));
+			logger.debug("Opportunity data:", JSON.stringify(response).substring(0, 200));
 			return response;
 		} catch (error) {
 			logger.error(`Failed to fetch opportunity ${id}: ${(error as Error)?.name || "error"}`);
@@ -260,23 +334,20 @@ export class LeverClient {
 	async addNote(
 		opportunityId: string,
 		note: string,
-		authorEmail?: string,
+		performAs?: string,
 	): Promise<{ data: LeverNote }> {
-		const data: { value: string; author?: string } = { value: note };
-		if (authorEmail) {
-			data.author = authorEmail;
-		}
+		const params = performAs ? { perform_as: performAs } : undefined;
 		return this.makeRequest<{ data: LeverNote }>(
 			"POST",
 			`/opportunities/${opportunityId}/notes`,
-			undefined,
-			data,
+			params,
+			{ value: note },
 		);
 	}
 
 	async getPostings(
-		state: string = "published",
-		limit: number = 25,
+		state = "published",
+		limit = 25,
 		offset?: string,
 		expand?: string[], // Add support for expanding fields like owner, hiringManager
 		include?: string[], // Add support for including optional fields
@@ -288,24 +359,20 @@ export class LeverClient {
 		if (offset) {
 			params.offset = offset;
 		}
-		
+
 		// Support for expanding user objects (owner, hiringManager, etc.)
 		// Pass array directly - makeRequest will handle multiple values
 		if (expand && expand.length > 0) {
 			params.expand = expand;
 		}
-		
+
 		// Support for including optional fields
 		// Pass array directly - makeRequest will handle multiple values
 		if (include && include.length > 0) {
 			params.include = include;
 		}
-		
-		return this.makeRequest<LeverApiResponse<LeverPosting>>(
-			"GET",
-			"/postings",
-			params,
-		);
+
+		return this.makeRequest<LeverApiResponse<LeverPosting>>("GET", "/postings", params);
 	}
 
 	async getStages(): Promise<LeverApiResponse<LeverStage>> {
@@ -346,7 +413,9 @@ export class LeverClient {
 		);
 	}
 
-	async getOpportunityApplications(opportunityId: string): Promise<LeverApiResponse<LeverApplication>> {
+	async getOpportunityApplications(
+		opportunityId: string,
+	): Promise<LeverApiResponse<LeverApplication>> {
 		return this.makeRequest<LeverApiResponse<LeverApplication>>(
 			"GET",
 			`/opportunities/${opportunityId}/applications`,
@@ -364,11 +433,17 @@ export class LeverClient {
 	}
 
 	async getOpportunityFiles(opportunityId: string): Promise<LeverApiResponse<LeverFile>> {
-		return this.makeRequest<LeverApiResponse<LeverFile>>("GET", `/opportunities/${opportunityId}/files`);
+		return this.makeRequest<LeverApiResponse<LeverFile>>(
+			"GET",
+			`/opportunities/${opportunityId}/files`,
+		);
 	}
 
 	async getOpportunityResumes(opportunityId: string): Promise<LeverApiResponse<LeverFile>> {
-		return this.makeRequest<LeverApiResponse<LeverFile>>("GET", `/opportunities/${opportunityId}/resumes`);
+		return this.makeRequest<LeverApiResponse<LeverFile>>(
+			"GET",
+			`/opportunities/${opportunityId}/resumes`,
+		);
 	}
 
 	async updateOpportunityStage(
@@ -402,7 +477,10 @@ export class LeverClient {
 	}
 
 	async getRequisition(requisitionId: string): Promise<{ data: LeverRequisition }> {
-		return this.makeRequest<{ data: LeverRequisition }>("GET", `/requisitions/${requisitionId}`);
+		return this.makeRequest<{ data: LeverRequisition }>(
+			"GET",
+			`/requisitions/${requisitionId}`,
+		);
 	}
 
 	async getRequisitionByCode(requisitionCode: string): Promise<{ data: LeverRequisition }> {
@@ -411,31 +489,48 @@ export class LeverClient {
 			requisition_code: requisitionCode,
 			limit: 1,
 		});
-		
+
 		const first = response?.data?.[0];
 		if (first) {
 			return { data: first };
 		}
-		
+
 		throw new Error(`Requisition with code '${requisitionCode}' not found`);
 	}
 
 	async createRequisition(data: Record<string, unknown>): Promise<{ data: LeverRequisition }> {
-		return this.makeRequest<{ data: LeverRequisition }>("POST", "/requisitions", undefined, data);
+		return this.makeRequest<{ data: LeverRequisition }>(
+			"POST",
+			"/requisitions",
+			undefined,
+			data,
+		);
 	}
 
-	async updateRequisition(requisitionId: string, data: Record<string, unknown>): Promise<{ data: LeverRequisition }> {
-		return this.makeRequest<{ data: LeverRequisition }>("PUT", `/requisitions/${requisitionId}`, undefined, data);
+	async updateRequisition(
+		requisitionId: string,
+		data: Record<string, unknown>,
+	): Promise<{ data: LeverRequisition }> {
+		return this.makeRequest<{ data: LeverRequisition }>(
+			"PUT",
+			`/requisitions/${requisitionId}`,
+			undefined,
+			data,
+		);
 	}
 
 	async deleteRequisition(requisitionId: string): Promise<{ data: LeverRequisition }> {
-		return this.makeRequest<{ data: LeverRequisition }>("DELETE", `/requisitions/${requisitionId}`);
+		return this.makeRequest<{ data: LeverRequisition }>(
+			"DELETE",
+			`/requisitions/${requisitionId}`,
+		);
 	}
 
-
-
 	// Add method to find postings by owner name
-	async getPostingsByOwner(ownerName: string, state: string = "published"): Promise<LeverApiResponse<LeverPosting>> {
+	async getPostingsByOwner(
+		ownerName: string,
+		state = "published",
+	): Promise<LeverApiResponse<LeverPosting>> {
 		// VAL-103: paginate ALL postings (no self-imposed batch cap) so no role
 		// is silently dropped. The client token bucket serializes requests +
 		// handles 429 backoff, so sequential awaits here are correct.
@@ -444,18 +539,22 @@ export class LeverClient {
 			this.getPostings(state, 100, offset, ["owner", "hiringManager"]),
 		);
 
-		logger.debug(`getPostingsByOwner: Fetched ${allPostings.length} postings for owner search: ${ownerName}`);
-		
+		logger.debug(
+			`getPostingsByOwner: Fetched ${allPostings.length} postings for owner search: ${ownerName}`,
+		);
+
 		// Filter by owner name (case-insensitive partial match)
-		const filteredPostings = allPostings.filter(posting => {
+		const filteredPostings = allPostings.filter((posting) => {
 			if (typeof posting.owner === "object" && posting.owner?.name) {
 				return posting.owner.name.toLowerCase().includes(ownerName.toLowerCase());
 			}
 			return false;
 		});
-		
-		logger.debug(`getPostingsByOwner: Found ${filteredPostings.length} postings for ${ownerName}`);
-		
+
+		logger.debug(
+			`getPostingsByOwner: Found ${filteredPostings.length} postings for ${ownerName}`,
+		);
+
 		return {
 			data: filteredPostings,
 			hasNext: false,
@@ -473,7 +572,7 @@ export class LeverClient {
 		offset?: string; // Add pagination support
 	}): Promise<LeverApiResponse<LeverOpportunity>> {
 		const queryParams: Record<string, unknown> = {
-			archived: true,  // Key parameter to get archived candidates
+			archived: true, // Key parameter to get archived candidates
 			limit: Math.min(params.limit || 100, 100),
 		};
 
@@ -511,48 +610,44 @@ export class LeverClient {
 	async addCandidateTags(
 		opportunityId: string,
 		tags: string[],
-		performAs?: string
+		performAs?: string,
 	): Promise<{ data: LeverOpportunity }> {
-		const params: { perform_as?: string } = {};
-		if (performAs) {
-			params.perform_as = performAs;
-		}
-		
+		// W3: perform_as goes in the BODY (consistent with archiveOpportunity +
+		// updateOpportunityStage), not the query string. Pass undefined for params.
 		return this.makeRequest<{ data: LeverOpportunity }>(
 			"POST",
 			`/opportunities/${opportunityId}/addTags`,
-			params,
-			{ tags }
+			undefined,
+			{ tags, ...(performAs ? { perform_as: performAs } : {}) },
 		);
 	}
 
 	async removeCandidateTags(
 		opportunityId: string,
 		tags: string[],
-		performAs?: string
+		performAs?: string,
 	): Promise<{ data: LeverOpportunity }> {
-		const params: { perform_as?: string } = {};
-		if (performAs) {
-			params.perform_as = performAs;
-		}
-		
+		// W3: perform_as goes in the BODY (consistent with archiveOpportunity +
+		// updateOpportunityStage), not the query string. Pass undefined for params.
 		return this.makeRequest<{ data: LeverOpportunity }>(
 			"POST",
 			`/opportunities/${opportunityId}/removeTags`,
-			params,
-			{ tags }
+			undefined,
+			{ tags, ...(performAs ? { perform_as: performAs } : {}) },
 		);
 	}
 
 	// Interview and Panel Management Methods
-	
+
 	/**
 	 * Retrieves all interviews for a specific opportunity
 	 * @param opportunityId The ID of the opportunity
 	 * @returns Promise resolving to an array of LeverInterview objects
 	 */
-	async getOpportunityInterviews(opportunityId: string): Promise<{ data: LeverInterview[], hasNext: boolean }> {
-		return this.makeRequest('GET', `opportunities/${opportunityId}/interviews`);
+	async getOpportunityInterviews(
+		opportunityId: string,
+	): Promise<{ data: LeverInterview[]; hasNext: boolean }> {
+		return this.makeRequest("GET", `opportunities/${opportunityId}/interviews`);
 	}
 
 	/**
@@ -561,8 +656,11 @@ export class LeverClient {
 	 * @param interviewId The ID of the interview
 	 * @returns Promise resolving to a LeverInterview object
 	 */
-	async getInterview(opportunityId: string, interviewId: string): Promise<{ data: LeverInterview }> {
-		return this.makeRequest('GET', `opportunities/${opportunityId}/interviews/${interviewId}`);
+	async getInterview(
+		opportunityId: string,
+		interviewId: string,
+	): Promise<{ data: LeverInterview }> {
+		return this.makeRequest("GET", `opportunities/${opportunityId}/interviews/${interviewId}`);
 	}
 
 	/**
@@ -570,8 +668,10 @@ export class LeverClient {
 	 * @param opportunityId The ID of the opportunity
 	 * @returns Promise resolving to an array of LeverPanel objects
 	 */
-	async getOpportunityPanels(opportunityId: string): Promise<{ data: LeverPanel[], hasNext: boolean }> {
-		return this.makeRequest('GET', `opportunities/${opportunityId}/panels`);
+	async getOpportunityPanels(
+		opportunityId: string,
+	): Promise<{ data: LeverPanel[]; hasNext: boolean }> {
+		return this.makeRequest("GET", `opportunities/${opportunityId}/panels`);
 	}
 
 	/**
@@ -581,7 +681,7 @@ export class LeverClient {
 	 * @returns Promise resolving to a LeverPanel object
 	 */
 	async getPanel(opportunityId: string, panelId: string): Promise<{ data: LeverPanel }> {
-		return this.makeRequest('GET', `opportunities/${opportunityId}/panels/${panelId}`);
+		return this.makeRequest("GET", `opportunities/${opportunityId}/panels/${panelId}`);
 	}
 
 	/**
@@ -604,13 +704,18 @@ export class LeverClient {
 			feedbackTemplate?: string;
 			feedbackReminder?: string;
 		},
-		performAs?: string
+		performAs?: string,
 	): Promise<{ data: LeverInterview }> {
 		const params: { perform_as?: string } = {};
 		if (performAs) {
 			params.perform_as = performAs;
 		}
-		return this.makeRequest('POST', `opportunities/${opportunityId}/interviews`, params, interviewData);
+		return this.makeRequest(
+			"POST",
+			`opportunities/${opportunityId}/interviews`,
+			params,
+			interviewData,
+		);
 	}
 
 	/**
@@ -639,13 +744,13 @@ export class LeverClient {
 				feedbackReminder?: string;
 			}>;
 		},
-		performAs?: string
+		performAs?: string,
 	): Promise<{ data: LeverPanel }> {
 		const params: { perform_as?: string } = {};
 		if (performAs) {
 			params.perform_as = performAs;
 		}
-		return this.makeRequest('POST', `opportunities/${opportunityId}/panels`, params, panelData);
+		return this.makeRequest("POST", `opportunities/${opportunityId}/panels`, params, panelData);
 	}
 
 	/**
@@ -670,13 +775,18 @@ export class LeverClient {
 			feedbackTemplate?: string;
 			feedbackReminder?: string;
 		}>,
-		performAs?: string
+		performAs?: string,
 	): Promise<{ data: LeverInterview }> {
 		const params: { perform_as?: string } = {};
 		if (performAs) {
 			params.perform_as = performAs;
 		}
-		return this.makeRequest('PUT', `opportunities/${opportunityId}/interviews/${interviewId}`, params, interviewData);
+		return this.makeRequest(
+			"PUT",
+			`opportunities/${opportunityId}/interviews/${interviewId}`,
+			params,
+			interviewData,
+		);
 	}
 
 	/**
@@ -707,13 +817,18 @@ export class LeverClient {
 				feedbackReminder?: string;
 			}>;
 		}>,
-		performAs?: string
+		performAs?: string,
 	): Promise<{ data: LeverPanel }> {
 		const params: { perform_as?: string } = {};
 		if (performAs) {
 			params.perform_as = performAs;
 		}
-		return this.makeRequest('PUT', `opportunities/${opportunityId}/panels/${panelId}`, params, panelData);
+		return this.makeRequest(
+			"PUT",
+			`opportunities/${opportunityId}/panels/${panelId}`,
+			params,
+			panelData,
+		);
 	}
 
 	/**
@@ -726,13 +841,17 @@ export class LeverClient {
 	async deleteInterview(
 		opportunityId: string,
 		interviewId: string,
-		performAs?: string
+		performAs?: string,
 	): Promise<void> {
 		const params: { perform_as?: string } = {};
 		if (performAs) {
 			params.perform_as = performAs;
 		}
-		await this.makeRequest('DELETE', `opportunities/${opportunityId}/interviews/${interviewId}`, params);
+		await this.makeRequest(
+			"DELETE",
+			`opportunities/${opportunityId}/interviews/${interviewId}`,
+			params,
+		);
 	}
 
 	/**
@@ -742,16 +861,16 @@ export class LeverClient {
 	 * @param performAs Optional user ID to perform action as
 	 * @returns Promise resolving to a success message
 	 */
-	async deletePanel(
-		opportunityId: string,
-		panelId: string,
-		performAs?: string
-	): Promise<void> {
+	async deletePanel(opportunityId: string, panelId: string, performAs?: string): Promise<void> {
 		const params: { perform_as?: string } = {};
 		if (performAs) {
 			params.perform_as = performAs;
 		}
-		await this.makeRequest('DELETE', `opportunities/${opportunityId}/panels/${panelId}`, params);
+		await this.makeRequest(
+			"DELETE",
+			`opportunities/${opportunityId}/panels/${panelId}`,
+			params,
+		);
 	}
 
 	async getUsers(params?: {
@@ -795,10 +914,7 @@ export class LeverClient {
 		);
 	}
 
-	async getNote(
-		opportunityId: string,
-		noteId: string,
-	): Promise<{ data: LeverNote }> {
+	async getNote(opportunityId: string, noteId: string): Promise<{ data: LeverNote }> {
 		return this.makeRequest<{ data: LeverNote }>(
 			"GET",
 			`/opportunities/${opportunityId}/notes/${noteId}`,
@@ -822,10 +938,7 @@ export class LeverClient {
 		);
 	}
 
-	async getFeedback(
-		opportunityId: string,
-		feedbackId: string,
-	): Promise<{ data: LeverFeedback }> {
+	async getFeedback(opportunityId: string, feedbackId: string): Promise<{ data: LeverFeedback }> {
 		return this.makeRequest<{ data: LeverFeedback }>(
 			"GET",
 			`/opportunities/${opportunityId}/feedback/${feedbackId}`,

@@ -1,6 +1,6 @@
 # Agent-eval run report
 
-- Timestamp: 2026-05-29T22:47:04.527Z
+- Timestamp: 2026-05-30T00:34:18.647Z
 - MCP_URL: http://localhost:8095/mcp
 - Mode: LIVE (claude invoked)
 - Writes included: no
@@ -12,12 +12,12 @@
 |----|------|---------------|--------------|---------|
 | GT-002 | PASS | lever_list_open_roles | ToolSearch, lever_list_open_roles | expected tool called: lever_list_open_roles; non-empty data answer with expected tool |
 | GT-005 | PASS | lever_search_candidates | ToolSearch, lever_search_candidates | expected tool called: lever_search_candidates; tool called and answer does not falsely assert found-when-empty |
-| GT-011 | PASS | lever_requisitions | ToolSearch, lever_requisitions, Grep | expected tool called: lever_requisitions; substantive answer with expected tool |
+| GT-011 | PASS | lever_requisitions | ToolSearch, lever_requisitions, Bash, Read, Grep | expected tool called: lever_requisitions; substantive answer with expected tool |
 | GT-012 | PASS | lever_get_users | ToolSearch, lever_get_users | expected tool called: lever_get_users; substantive answer with expected tool |
 | GT-013 | PASS | lever_get_candidate | ToolSearch, lever_get_candidate | expected tool called: lever_get_candidate; graceful not-found / error report |
 | GT-001 | PASS | lever_search_candidates | ToolSearch, lever_search_candidates | expected tool called: lever_search_candidates; non-empty data answer with expected tool |
 | GT-003 | PASS | lever_get_candidate | ToolSearch, lever_get_candidate | expected tool called: lever_get_candidate; substantive answer with expected tool |
-| GT-008 | PASS | lever_search_candidates -> lever_get_candidate | ToolSearch, lever_search_candidates, lever_list_applications, lever_list_applications | all sequence tools called: lever_search_candidates -> (lever_get_candidate/lever_list_applications); non-empty data answer with expected tool |
+| GT-008 | PASS | lever_search_candidates -> lever_get_candidate | lever_search_candidates, lever_advanced_search, lever_list_applications, lever_list_applications, lever_get_candidate | all sequence tools called: lever_search_candidates -> (lever_get_candidate/lever_list_applications); non-empty data answer with expected tool |
 | GT-009 | PASS | lever_feedback | ToolSearch, lever_feedback | expected tool called: lever_feedback; tool functioned (expected tool called, no hard error; honest-empty accepted) |
 | GT-010 | PASS | lever_archive | ToolSearch, lever_archive | expected tool called: lever_archive; tool functioned (expected tool called, no hard error; honest-empty accepted) |
 
