@@ -59,17 +59,15 @@ jobs:
           head: ${{ github.event.pull_request.head.sha }}
           extra_args: --only-verified
 
-      # --- Soft gates (report-only until M3a cleanup) ---
-      # The codebase has pre-existing biome lint errors + format issues
-      # (3 errors + 232 warnings as of 2026-05-26) that predate the v3
-      # refactor. Cleaning them in M3a (file split) is the natural moment.
-      # Until then, surface lint output for visibility without blocking PRs.
-      # After M3a, flip continue-on-error to false to make these hard gates.
+      # --- Lint + format are now HARD gates (review cleanup 2026-05-29) ---
+      # The lint baseline was cleaned (0 errors; remaining noExplicitAny
+      # warnings stay 'warn' and do not fail biome's exit code) and the
+      # format baseline normalized. Scoped to src/ so gitignored dist/ does
+      # not inflate counts. biome.json root:true makes the local config
+      # authoritative.
 
-      - name: Lint (biome — report-only)
-        run: npx biome lint .
-        continue-on-error: true
+      - name: Lint (biome — hard gate)
+        run: npx biome lint src/
 
-      - name: Format check (biome — report-only)
-        run: npx biome format .
-        continue-on-error: true
+      - name: Format check (biome — hard gate)
+        run: npx biome format src/
